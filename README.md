@@ -20,6 +20,15 @@ The **GROT Structure** panel in the Explorer provides:
 - Quick navigation to any rotation
 - At-a-glance statistics (rotation count, age range)
 - Visual indication of disabled rotations
+- **Edit MPRS metadata** directly from the tree view (right-click → Edit Metadata)
+
+### ✏️ MPRS Metadata Editor
+Edit MPRS properties in a dedicated panel:
+- Modify plate ID, code, and name
+- Update plate pair relationships (@PP)
+- Add/edit comments (@C)
+- View rotation statistics at a glance
+- Quick navigation back to source line
 
 ### 💡 IntelliSense & Auto-Completion
 - Auto-complete for all standard attributes
@@ -58,6 +67,8 @@ View comprehensive statistics including:
 | `GROT: Add New MPRS` | Create a new plate rotation sequence |
 | `GROT: Toggle Rotation` | Enable/disable a rotation |
 | `GROT: Go to MPRS...` | Quick navigation picker |
+| `GROT: Go to Plate ID...` | Jump to MPRS by plate ID number |
+| `GROT: Edit MPRS Metadata...` | Open MPRS editor panel |
 | `GROT: Show Statistics` | Open statistics panel |
 | `GROT: Validate File` | Run full validation |
 | `GROT: Format File` | Align columns and standardize formatting |
@@ -130,6 +141,9 @@ Prefix with `#`:
 | Shortcut | Command |
 |----------|---------|
 | `Ctrl+Shift+P` → "GROT:" | Access all GROT commands |
+| `Ctrl+G Ctrl+P` (Mac: `Cmd+G Cmd+P`) | Go to Plate ID |
+| `Ctrl+G Ctrl+M` (Mac: `Cmd+G Cmd+M`) | Go to MPRS (picker) |
+| `Ctrl+G Ctrl+E` (Mac: `Cmd+G Cmd+E`) | Edit MPRS Metadata |
 | `F12` | Go to definition (MPRS) |
 | `Ctrl+Shift+O` | Open symbol outline |
 

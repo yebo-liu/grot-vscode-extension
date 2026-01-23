@@ -85,16 +85,31 @@
         "command": "grot.sortByAge",
         "title": "GROT: Sort Rotations by Age"
       },
-      {
-        "command": "grot.exportToCSV",
-        "title": "GROT: Export MPRS to CSV"
-      },
-      {
-        "command": "grot.refreshTreeView",
-        "title": "GROT: Refresh Tree View",
-        "icon": "$(refresh)"
-      }
-    ],
+{
+      "command": "grot.exportToCSV",
+      "title": "GROT: Export MPRS to CSV"
+    },
+    {
+      "command": "grot.refreshTreeView",
+      "title": "GROT: Refresh Tree View",
+      "icon": "$(refresh)"
+    },
+    {
+      "command": "grot.goToPlateId",
+      "title": "GROT: Go to Plate ID...",
+      "icon": "$(search)"
+    },
+    {
+      "command": "grot.editMPRS",
+      "title": "GROT: Edit MPRS Metadata...",
+      "icon": "$(edit)"
+    },
+    {
+      "command": "grot.editMPRSFromTree",
+      "title": "Edit Metadata",
+      "icon": "$(edit)"
+    }
+  ],
     "menus": {
       "editor/context": [
         {
@@ -120,6 +135,16 @@
           "command": "grot.addRotation",
           "when": "view == grotExplorer && viewItem == mprs",
           "group": "inline"
+        },
+        {
+          "command": "grot.editMPRSFromTree",
+          "when": "view == grotExplorer && viewItem == mprs",
+          "group": "inline"
+        },
+        {
+          "command": "grot.editMPRSFromTree",
+          "when": "view == grotExplorer && viewItem == mprs",
+          "group": "navigation"
         }
       ]
     },
@@ -178,6 +203,26 @@
         }
       }
     },
+    "keybindings": [
+      {
+        "command": "grot.goToPlateId",
+        "key": "ctrl+g ctrl+p",
+        "mac": "cmd+g cmd+p",
+        "when": "resourceLangId == grot"
+      },
+      {
+        "command": "grot.goToMPRS",
+        "key": "ctrl+g ctrl+m",
+        "mac": "cmd+g cmd+m",
+        "when": "resourceLangId == grot"
+      },
+      {
+        "command": "grot.editMPRS",
+        "key": "ctrl+g ctrl+e",
+        "mac": "cmd+g cmd+e",
+        "when": "resourceLangId == grot"
+      }
+    ],
     "snippets": [
       {
         "language": "grot",

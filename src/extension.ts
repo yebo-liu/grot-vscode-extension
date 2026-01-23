@@ -953,6 +953,440 @@ async function exportToCSV(): Promise<void> {
 }
 
 // ============================================================================
+// Go to Plate ID - Quick Navigation
+// ============================================================================
+
+async function goToPlateId(): Promise<void> {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.document.languageId !== 'grot') {
+        vscode.window.showErrorMessage('No .grot file is open');
+        return;
+    }
+
+    const grotDoc = GrotParser.parse(editor.document);
+    
+    // Build a map of plate IDs for quick lookup
+    const plateIdMap = new Map<number, MPRS>();
+    for (const mprs of grotDoc.mprsSequences) {
+        plateIdMap.set(mprs.plateId, mprs);
+    }
+
+    const plateIdInput = await vscode.window.showInputBox({
+        prompt: 'Enter Plate ID to navigate to',
+        placeHolder: 'e.g., 101, 609, 801',
+        validateInput: (value) => {
+            if (!value) return 'Please enter a plate ID';
+            const id = parseInt(value);
+            if (isNaN(id)) return 'Please enter a valid number';
+            if (!plateIdMap.has(id)) {
+                // Show available plate IDs as hint
+                const available = Array.from(plateIdMap.keys()).slice(0, 10).join(', ');
+                return `Plate ID ${id} not found. Available: ${available}...`;
+            }
+            return null;
+        }
+    });
+
+    if (!plateIdInput) return;
+
+    const plateId = parseInt(plateIdInput);
+    const mprs = plateIdMap.get(plateId);
+    
+    if (mprs) {
+        const position = new vscode.Position(mprs.line, 0);
+        editor.selection = new vscode.Selection(position, position);
+        editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
+        vscode.window.showInformationMessage(`Jumped to ${mprs.code} (${mprs.plateId}) - ${mprs.name}`);
+    }
+}
+
+// ============================================================================
+// MPRS Metadata Editor Panel
+// ============================================================================
+
+class MPRSEditorPanel {
+    public static currentPanel: MPRSEditorPanel | undefined;
+    private readonly _panel: vscode.WebviewPanel;
+    private readonly _extensionUri: vscode.Uri;
+    private _mprs: MPRS;
+    private _document: vscode.TextDocument;
+    private _disposables: vscode.Disposable[] = [];
+
+    private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri, mprs: MPRS, document: vscode.TextDocument) {
+        this._panel = panel;
+        this._extensionUri = extensionUri;
+        this._mprs = mprs;
+        this._document = document;
+
+        this._update();
+
+        this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
+
+        this._panel.webview.onDidReceiveMessage(
+            async message => {
+                switch (message.command) {
+                    case 'save':
+                        await this._saveMetadata(message.data);
+                        break;
+                    case 'goToLine':
+                        this._goToLine(message.line);
+                        break;
+                }
+            },
+            null,
+            this._disposables
+        );
+    }
+
+    public static createOrShow(extensionUri: vscode.Uri, mprs: MPRS, document: vscode.TextDocument): void {
+        const column = vscode.ViewColumn.Beside;
+
+        if (MPRSEditorPanel.currentPanel) {
+            MPRSEditorPanel.currentPanel._mprs = mprs;
+            MPRSEditorPanel.currentPanel._document = document;
+            MPRSEditorPanel.currentPanel._update();
+            MPRSEditorPanel.currentPanel._panel.reveal(column);
+            return;
+        }
+
+        const panel = vscode.window.createWebviewPanel(
+            'mprsEditor',
+            `Edit MPRS: ${mprs.code} (${mprs.plateId})`,
+            column,
+            {
+                enableScripts: true,
+                retainContextWhenHidden: true
+            }
+        );
+
+        MPRSEditorPanel.currentPanel = new MPRSEditorPanel(panel, extensionUri, mprs, document);
+    }
+
+    private _goToLine(line: number): void {
+        const editor = vscode.window.visibleTextEditors.find(e => e.document === this._document);
+        if (editor) {
+            const position = new vscode.Position(line, 0);
+            editor.selection = new vscode.Selection(position, position);
+            editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
+        }
+    }
+
+    private async _saveMetadata(data: { plateId: string; code: string; name: string; platePair: string; comment: string }): Promise<void> {
+        const editor = vscode.window.visibleTextEditors.find(e => e.document === this._document);
+        if (!editor) {
+            vscode.window.showErrorMessage('Could not find the editor for this document');
+            return;
+        }
+
+        // Find the MPRS header lines (could be 1 or 2 lines starting with >)
+        const startLine = this._mprs.line;
+        let endLine = startLine;
+        
+        // Check if there's a second header line
+        if (startLine + 1 < this._document.lineCount) {
+            const nextLine = this._document.lineAt(startLine + 1).text.trim();
+            if (nextLine.startsWith('>') && !nextLine.match(/@MPRS:pid/)) {
+                endLine = startLine + 1;
+            }
+        }
+
+        // Build new header lines
+        const newLine1 = `> @MPRS:pid"${data.plateId}" @MPRS:code"${data.code}" @MPRS:name"${data.name}"`;
+        const newLine2 = `> @PP"${data.platePair}"${data.comment ? ` @C"${data.comment}"` : ''}`;
+
+        const range = new vscode.Range(startLine, 0, endLine, this._document.lineAt(endLine).text.length);
+        
+        await editor.edit(editBuilder => {
+            editBuilder.replace(range, `${newLine1}\n${newLine2}`);
+        });
+
+        vscode.window.showInformationMessage(`Updated MPRS ${data.code} (${data.plateId})`);
+        
+        // Re-parse and update panel
+        const grotDoc = GrotParser.parse(this._document);
+        const updatedMprs = grotDoc.mprsSequences.find(m => m.plateId === parseInt(data.plateId));
+        if (updatedMprs) {
+            this._mprs = updatedMprs;
+            this._update();
+        }
+    }
+
+    private _update(): void {
+        this._panel.title = `Edit MPRS: ${this._mprs.code} (${this._mprs.plateId})`;
+        this._panel.webview.html = this._getHtmlForWebview();
+    }
+
+    private _getHtmlForWebview(): string {
+        const mprs = this._mprs;
+        const comment = mprs.metadata.get('C') || '';
+        
+        return `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edit MPRS</title>
+    <style>
+        :root {
+            --bg: var(--vscode-editor-background);
+            --fg: var(--vscode-editor-foreground);
+            --input-bg: var(--vscode-input-background);
+            --input-fg: var(--vscode-input-foreground);
+            --input-border: var(--vscode-input-border);
+            --button-bg: var(--vscode-button-background);
+            --button-fg: var(--vscode-button-foreground);
+            --button-hover: var(--vscode-button-hoverBackground);
+            --accent: var(--vscode-textLink-foreground);
+        }
+        body {
+            font-family: var(--vscode-font-family);
+            padding: 20px;
+            background: var(--bg);
+            color: var(--fg);
+        }
+        h1 {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 24px;
+            font-size: 1.4em;
+            border-bottom: 1px solid var(--input-border);
+            padding-bottom: 12px;
+        }
+        h1 .icon { font-size: 1.5em; }
+        .form-group {
+            margin-bottom: 16px;
+        }
+        label {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: 600;
+            color: var(--accent);
+        }
+        input, textarea {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid var(--input-border);
+            background: var(--input-bg);
+            color: var(--input-fg);
+            border-radius: 4px;
+            font-family: inherit;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        input:focus, textarea:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+        textarea {
+            resize: vertical;
+            min-height: 60px;
+        }
+        .row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+        .actions {
+            display: flex;
+            gap: 12px;
+            margin-top: 24px;
+            padding-top: 16px;
+            border-top: 1px solid var(--input-border);
+        }
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+        .btn-primary {
+            background: var(--button-bg);
+            color: var(--button-fg);
+        }
+        .btn-primary:hover {
+            background: var(--button-hover);
+        }
+        .btn-secondary {
+            background: transparent;
+            color: var(--fg);
+            border: 1px solid var(--input-border);
+        }
+        .btn-secondary:hover {
+            background: var(--input-bg);
+        }
+        .info-box {
+            background: var(--input-bg);
+            border-radius: 6px;
+            padding: 16px;
+            margin-bottom: 20px;
+        }
+        .info-box h3 {
+            margin: 0 0 8px 0;
+            font-size: 0.9em;
+            color: var(--accent);
+        }
+        .info-box .stat {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 0;
+        }
+        .info-box .stat-value {
+            font-weight: 600;
+        }
+        .hint {
+            font-size: 0.85em;
+            color: var(--vscode-descriptionForeground);
+            margin-top: 4px;
+        }
+    </style>
+</head>
+<body>
+    <h1><span class="icon">🌍</span> Edit MPRS Metadata</h1>
+    
+    <div class="info-box">
+        <h3>📊 Sequence Statistics</h3>
+        <div class="stat">
+            <span>Total Rotations:</span>
+            <span class="stat-value">${mprs.rotations.length}</span>
+        </div>
+        <div class="stat">
+            <span>Enabled:</span>
+            <span class="stat-value">${mprs.rotations.filter(r => !r.disabled).length}</span>
+        </div>
+        <div class="stat">
+            <span>Age Range:</span>
+            <span class="stat-value">${mprs.rotations.length > 0 ? 
+                `${Math.min(...mprs.rotations.filter(r => !r.disabled).map(r => r.age))} - ${Math.max(...mprs.rotations.filter(r => !r.disabled).map(r => r.age))} Ma` : 
+                'N/A'}</span>
+        </div>
+        <div class="stat">
+            <span>Line Number:</span>
+            <span class="stat-value"><a href="#" onclick="goToLine(${mprs.line})">${mprs.line + 1}</a></span>
+        </div>
+    </div>
+
+    <form id="mprsForm">
+        <div class="row">
+            <div class="form-group">
+                <label for="plateId">Plate ID</label>
+                <input type="number" id="plateId" value="${mprs.plateId}" required>
+                <div class="hint">Unique numeric identifier for this plate</div>
+            </div>
+            <div class="form-group">
+                <label for="code">Plate Code</label>
+                <input type="text" id="code" value="${mprs.code}" required maxlength="10">
+                <div class="hint">Short code (e.g., NAM, EUR, AFR)</div>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="name">Plate Name</label>
+            <input type="text" id="name" value="${mprs.name}" required>
+            <div class="hint">Full name of the tectonic plate</div>
+        </div>
+
+        <div class="form-group">
+            <label for="platePair">Plate Pair (@PP)</label>
+            <input type="text" id="platePair" value="${mprs.platePair}" placeholder="MOV-FIX">
+            <div class="hint">Moving plate - Fixed plate relationship (e.g., NAM-AFR)</div>
+        </div>
+
+        <div class="form-group">
+            <label for="comment">Comment (@C)</label>
+            <textarea id="comment" rows="2">${comment}</textarea>
+            <div class="hint">Optional description or notes</div>
+        </div>
+
+        <div class="actions">
+            <button type="submit" class="btn-primary">💾 Save Changes</button>
+            <button type="button" class="btn-secondary" onclick="goToLine(${mprs.line})">📍 Go to Line</button>
+        </div>
+    </form>
+
+    <script>
+        const vscode = acquireVsCodeApi();
+        
+        document.getElementById('mprsForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            vscode.postMessage({
+                command: 'save',
+                data: {
+                    plateId: document.getElementById('plateId').value,
+                    code: document.getElementById('code').value,
+                    name: document.getElementById('name').value,
+                    platePair: document.getElementById('platePair').value,
+                    comment: document.getElementById('comment').value
+                }
+            });
+        });
+
+        function goToLine(line) {
+            vscode.postMessage({
+                command: 'goToLine',
+                line: line
+            });
+        }
+    </script>
+</body>
+</html>`;
+    }
+
+    public dispose(): void {
+        MPRSEditorPanel.currentPanel = undefined;
+        this._panel.dispose();
+        while (this._disposables.length) {
+            const x = this._disposables.pop();
+            if (x) {
+                x.dispose();
+            }
+        }
+    }
+}
+
+async function editMPRSMetadata(context: vscode.ExtensionContext, mprsLine?: number): Promise<void> {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.document.languageId !== 'grot') {
+        vscode.window.showErrorMessage('No .grot file is open');
+        return;
+    }
+
+    const grotDoc = GrotParser.parse(editor.document);
+    
+    let targetMprs: MPRS | undefined;
+    
+    if (mprsLine !== undefined) {
+        // Called from tree view with specific line
+        targetMprs = grotDoc.mprsSequences.find(m => m.line === mprsLine);
+    } else {
+        // Called from command palette - show picker
+        const items = grotDoc.mprsSequences.map(mprs => ({
+            label: `${mprs.code} (${mprs.plateId})`,
+            description: mprs.name,
+            detail: `${mprs.rotations.length} rotations | Line ${mprs.line + 1}`,
+            mprs: mprs
+        }));
+
+        const selected = await vscode.window.showQuickPick(items, {
+            placeHolder: 'Select MPRS to edit...',
+            matchOnDescription: true,
+            matchOnDetail: true
+        });
+
+        if (selected) {
+            targetMprs = selected.mprs;
+        }
+    }
+
+    if (targetMprs) {
+        MPRSEditorPanel.createOrShow(context.extensionUri, targetMprs, editor.document);
+    }
+}
+
+// ============================================================================
 // Extension Activation
 // ============================================================================
 
@@ -1012,9 +1446,16 @@ export function activate(context: vscode.ExtensionContext): void {
         }),
         vscode.commands.registerCommand('grot.showStatistics', showStatistics),
         vscode.commands.registerCommand('grot.goToMPRS', goToMPRS),
+        vscode.commands.registerCommand('grot.goToPlateId', goToPlateId),
         vscode.commands.registerCommand('grot.toggleRotation', toggleRotation),
         vscode.commands.registerCommand('grot.addRotation', addRotation),
         vscode.commands.registerCommand('grot.exportToCSV', exportToCSV),
+        vscode.commands.registerCommand('grot.editMPRS', (mprsLine?: number) => editMPRSMetadata(context, mprsLine)),
+        vscode.commands.registerCommand('grot.editMPRSFromTree', (item: GrotTreeItem) => {
+            if (item.lineNumber !== undefined) {
+                editMPRSMetadata(context, item.lineNumber);
+            }
+        }),
         vscode.commands.registerCommand('grot.validateFile', () => {
             const editor = vscode.window.activeTextEditor;
             if (editor && editor.document.languageId === 'grot') {
