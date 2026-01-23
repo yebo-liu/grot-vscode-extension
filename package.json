@@ -347,6 +347,19 @@
               "foreground": "#5A6368",
               "fontStyle": "italic strikethrough"
             }
+          },
+          {
+            "scope": "string.quoted.triple.comment.grot",
+            "settings": {
+              "foreground": "#7A9E8E",
+              "fontStyle": "italic"
+            }
+          },
+          {
+            "scope": "string.quoted.triple.grot",
+            "settings": {
+              "foreground": "#BBA86B"
+            }
           }
         ]
       }

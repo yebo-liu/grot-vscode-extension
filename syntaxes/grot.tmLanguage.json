@@ -25,6 +25,20 @@
     "mprs-header": {
       "patterns": [
         {
+          "name": "meta.mprs-header.multiline.grot",
+          "begin": "^(>)\\s*.*(@C)(\"\"\")",
+          "end": "\"\"\"",
+          "beginCaptures": {
+            "1": { "name": "keyword.control.mprs.grot" },
+            "2": { "name": "entity.name.tag.comment.grot" },
+            "3": { "name": "string.quoted.triple.comment.grot" }
+          },
+          "endCaptures": {
+            "0": { "name": "string.quoted.triple.comment.grot" }
+          },
+          "contentName": "string.quoted.triple.comment.grot"
+        },
+        {
           "name": "meta.mprs-header.grot",
           "begin": "^(>)\\s*",
           "end": "$",
