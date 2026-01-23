@@ -39,8 +39,8 @@ interface GrotDocument {
 // ============================================================================
 
 class GrotParser {
-    private static readonly MPRS_PATTERN = /^>\s*@MPRS:pid"(\d+)"\s*@MPRS:code"([^"]+)"\s*@MPRS:name"([^"]+)"/;
-    private static readonly MPRS_COMPACT_PATTERN = /^>\s*@MPRS"(\d+)\s*\|\s*([^|]+)\s*\|\s*([^"]+)"/;
+    private static readonly MPRS_PATTERN = /^>\s*@MPRS:pid"(\d+)"\s*@MPRS:code"([^"]*)"\s*@MPRS:name"([^"]*)"/;
+    private static readonly MPRS_COMPACT_PATTERN = /^>\s*@MPRS"(\d+)\s*\|\s*([^|]*)\s*\|\s*([^"]*)"/;
     private static readonly ROTATION_PATTERN = /^\s*(\d{1,4})\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(\d{1,4})/;
     private static readonly DISABLED_ROTATION_PATTERN = /^#\s*(\d{1,4})\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(\d{1,4})/;
     private static readonly ATTRIBUTE_PATTERN = /@([A-Z][A-Za-z0-9_:]*)"([^"]*)"/g;
