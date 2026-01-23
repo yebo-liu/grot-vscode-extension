@@ -673,23 +673,34 @@ class GrotFormattingProvider implements vscode.DocumentFormattingEditProvider {
         const edits: vscode.TextEdit[] = [];
         const config = vscode.workspace.getConfiguration('grot');
         const alignColumns = config.get('formatting.alignColumns', true);
-        const decimalPlaces = config.get('formatting.decimalPlaces', 4);
 
-        const rotationPattern = /^(\s*)(#?\s*)(\d{1,4})\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(\d{1,4})(.*)$/;
+        // Match rotation lines with plate IDs up to 6 digits
+        // Format: plateId age lat lon angle fixedPlateId [attributes]
+        const rotationPattern = /^(\s*)(#?\s*)(\d{1,6})\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(\d{1,6})(.*)$/;
 
         for (let i = 0; i < document.lineCount; i++) {
             const line = document.lineAt(i);
             const match = line.text.match(rotationPattern);
             
             if (match && alignColumns) {
-                const [, indent, prefix, pid1, age, lat, lon, angle, pid2, rest] = match;
+                const [, , prefix, pid1, age, lat, lon, angle, pid2, rest] = match;
                 
-                const formattedAge = parseFloat(age).toFixed(decimalPlaces).padStart(10);
-                const formattedLat = parseFloat(lat).toFixed(decimalPlaces).padStart(10);
-                const formattedLon = parseFloat(lon).toFixed(decimalPlaces).padStart(10);
-                const formattedAngle = parseFloat(angle).toFixed(decimalPlaces).padStart(10);
+                // Format to match the user's existing file format:
+                // - Plate ID: 8 chars right-aligned
+                // - Age: 10 chars, 5 decimal places
+                // - Lat: 9 chars, 5 decimal places  
+                // - Lon: 10 chars, 5 decimal places (handles negative 3-digit values)
+                // - Angle: 10 chars, 5 decimal places
+                // - Fixed Plate: 8 chars right-aligned
+                const formattedPid1 = pid1.padStart(8);
+                const formattedAge = parseFloat(age).toFixed(5).padStart(10);
+                const formattedLat = parseFloat(lat).toFixed(5).padStart(9);
+                const formattedLon = parseFloat(lon).toFixed(5).padStart(10);
+                const formattedAngle = parseFloat(angle).toFixed(5).padStart(10);
+                const formattedPid2 = pid2.padStart(8);
                 
-                const newLine = `${prefix}${pid1.padStart(3)}  ${formattedAge}  ${formattedLat}  ${formattedLon}  ${formattedAngle}  ${pid2.padStart(3)}${rest ? '  ' + rest.trim() : ''}`;
+                // Build line with proper spacing
+                const newLine = `${prefix}${formattedPid1}${formattedAge}${formattedLat}${formattedLon}${formattedAngle}${formattedPid2}${rest ? ' ' + rest.trim() : ''}`;
                 
                 if (newLine !== line.text) {
                     edits.push(vscode.TextEdit.replace(line.range, newLine));
