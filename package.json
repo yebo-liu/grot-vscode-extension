@@ -358,7 +358,8 @@
           {
             "scope": "string.quoted.triple.grot",
             "settings": {
-              "foreground": "#BBA86B"
+              "foreground": "#7A9E8E",
+              "fontStyle": "italic"
             }
           }
         ]
