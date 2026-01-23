@@ -306,7 +306,7 @@
           {
             "scope": "string.quoted.double.comment.grot",
             "settings": {
-              "foreground": "#7A9E8E",
+              "foreground": "#C9B86B",
               "fontStyle": "italic"
             }
           },
@@ -351,14 +351,14 @@
           {
             "scope": "string.quoted.triple.comment.grot",
             "settings": {
-              "foreground": "#7A9E8E",
+              "foreground": "#C9B86B",
               "fontStyle": "italic"
             }
           },
           {
             "scope": "string.quoted.triple.grot",
             "settings": {
-              "foreground": "#7A9E8E",
+              "foreground": "#C9B86B",
               "fontStyle": "italic"
             }
           }
