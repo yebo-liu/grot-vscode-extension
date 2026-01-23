@@ -665,55 +665,6 @@ class GrotDiagnosticsProvider {
 }
 
 // ============================================================================
-// Formatting Provider
-// ============================================================================
-
-class GrotFormattingProvider implements vscode.DocumentFormattingEditProvider {
-    provideDocumentFormattingEdits(document: vscode.TextDocument): vscode.ProviderResult<vscode.TextEdit[]> {
-        const edits: vscode.TextEdit[] = [];
-        const config = vscode.workspace.getConfiguration('grot');
-        const alignColumns = config.get('formatting.alignColumns', true);
-
-        // Match rotation lines with plate IDs up to 6 digits
-        // Format: plateId age lat lon angle fixedPlateId [attributes]
-        const rotationPattern = /^(\s*)(#?\s*)(\d{1,6})\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(\d{1,6})(.*)$/;
-
-        for (let i = 0; i < document.lineCount; i++) {
-            const line = document.lineAt(i);
-            const match = line.text.match(rotationPattern);
-            
-            if (match && alignColumns) {
-                const [, , prefix, pid1, age, lat, lon, angle, pid2, rest] = match;
-                
-                // Format to match rotconv.py output (line 357):
-                // '{0:>8}{1:11.5f}{2:10.5f}{3:11.5f}{4:11.5f}{5:>8}'
-                // - Plate ID: 8 chars right-aligned
-                // - Age: 11 chars, 5 decimal places
-                // - Lat: 10 chars, 5 decimal places  
-                // - Lon: 11 chars, 5 decimal places
-                // - Angle: 11 chars, 5 decimal places
-                // - Fixed Plate: 8 chars right-aligned
-                const formattedPid1 = pid1.padStart(8);
-                const formattedAge = parseFloat(age).toFixed(5).padStart(11);
-                const formattedLat = parseFloat(lat).toFixed(5).padStart(10);
-                const formattedLon = parseFloat(lon).toFixed(5).padStart(11);
-                const formattedAngle = parseFloat(angle).toFixed(5).padStart(11);
-                const formattedPid2 = pid2.padStart(8);
-                
-                // Build line with proper spacing
-                const newLine = `${prefix}${formattedPid1}${formattedAge}${formattedLat}${formattedLon}${formattedAngle}${formattedPid2}${rest ? ' ' + rest.trim() : ''}`;
-                
-                if (newLine !== line.text) {
-                    edits.push(vscode.TextEdit.replace(line.range, newLine));
-                }
-            }
-        }
-
-        return edits;
-    }
-}
-
-// ============================================================================
 // Commands
 // ============================================================================
 
@@ -2154,8 +2105,7 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(
         vscode.languages.registerHoverProvider('grot', new GrotHoverProvider()),
         vscode.languages.registerCompletionItemProvider('grot', new GrotCompletionProvider(), '@'),
-        vscode.languages.registerDocumentSymbolProvider('grot', new GrotDocumentSymbolProvider()),
-        vscode.languages.registerDocumentFormattingEditProvider('grot', new GrotFormattingProvider())
+        vscode.languages.registerDocumentSymbolProvider('grot', new GrotDocumentSymbolProvider())
     );
 
     // Register diagnostics

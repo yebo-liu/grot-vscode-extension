@@ -9,7 +9,6 @@
   },
   "categories": [
     "Programming Languages",
-    "Formatters",
     "Other"
   ],
   "keywords": [
@@ -64,10 +63,6 @@
       {
         "command": "grot.validateFile",
         "title": "GROT: Validate File"
-      },
-      {
-        "command": "grot.formatFile",
-        "title": "GROT: Format File"
       },
       {
         "command": "grot.goToMPRS",
@@ -176,16 +171,6 @@
           "type": "boolean",
           "default": true,
           "description": "Check that ages are in ascending order within MPRS"
-        },
-        "grot.formatting.alignColumns": {
-          "type": "boolean",
-          "default": true,
-          "description": "Align rotation data columns when formatting"
-        },
-        "grot.formatting.decimalPlaces": {
-          "type": "number",
-          "default": 4,
-          "description": "Number of decimal places for rotation values"
         },
         "grot.treeView.showDisabled": {
           "type": "boolean",
