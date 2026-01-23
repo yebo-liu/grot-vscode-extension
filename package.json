@@ -1,0 +1,228 @@
+{
+  "name": "grot-editor",
+  "displayName": "GPlates Rotation File Editor",
+  "description": "Full-featured editor for GPlates .grot rotation files with syntax highlighting, tree navigation, validation, and editing tools",
+  "version": "1.0.0",
+  "publisher": "gplates-community",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Formatters",
+    "Other"
+  ],
+  "keywords": [
+    "gplates",
+    "grot",
+    "rotation",
+    "plate tectonics",
+    "geoscience",
+    "geology"
+  ],
+  "activationEvents": [
+    "onLanguage:grot",
+    "workspaceContains:**/*.grot"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "grot",
+        "aliases": [
+          "GPlates Rotation",
+          "grot"
+        ],
+        "extensions": [
+          ".grot",
+          ".rot"
+        ],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icons/grot-icon.svg",
+          "dark": "./icons/grot-icon.svg"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "grot",
+        "scopeName": "source.grot",
+        "path": "./syntaxes/grot.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "grot.addRotation",
+        "title": "GROT: Add New Rotation",
+        "icon": "$(add)"
+      },
+      {
+        "command": "grot.addMPRS",
+        "title": "GROT: Add New Moving Plate Rotation Sequence"
+      },
+      {
+        "command": "grot.validateFile",
+        "title": "GROT: Validate File"
+      },
+      {
+        "command": "grot.formatFile",
+        "title": "GROT: Format File"
+      },
+      {
+        "command": "grot.goToMPRS",
+        "title": "GROT: Go to MPRS..."
+      },
+      {
+        "command": "grot.showStatistics",
+        "title": "GROT: Show File Statistics"
+      },
+      {
+        "command": "grot.toggleRotation",
+        "title": "GROT: Toggle Rotation (Enable/Disable)"
+      },
+      {
+        "command": "grot.sortByAge",
+        "title": "GROT: Sort Rotations by Age"
+      },
+      {
+        "command": "grot.exportToCSV",
+        "title": "GROT: Export MPRS to CSV"
+      },
+      {
+        "command": "grot.refreshTreeView",
+        "title": "GROT: Refresh Tree View",
+        "icon": "$(refresh)"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "when": "resourceLangId == grot",
+          "command": "grot.addRotation",
+          "group": "grot@1"
+        },
+        {
+          "when": "resourceLangId == grot",
+          "command": "grot.toggleRotation",
+          "group": "grot@2"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "grot.refreshTreeView",
+          "when": "view == grotExplorer",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "grot.addRotation",
+          "when": "view == grotExplorer && viewItem == mprs",
+          "group": "inline"
+        }
+      ]
+    },
+    "views": {
+      "explorer": [
+        {
+          "id": "grotExplorer",
+          "name": "GROT Structure",
+          "when": "resourceLangId == grot || grotFileOpen"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "grotExplorer",
+        "contents": "No .grot file is currently open.\n[Open a GROT file](command:workbench.action.files.openFile)"
+      }
+    ],
+    "configuration": {
+      "title": "GPlates Rotation Editor",
+      "properties": {
+        "grot.validation.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable real-time validation of .grot files"
+        },
+        "grot.validation.checkPlateIds": {
+          "type": "boolean",
+          "default": true,
+          "description": "Validate that plate IDs are consistent"
+        },
+        "grot.validation.checkAgeSequence": {
+          "type": "boolean",
+          "default": true,
+          "description": "Check that ages are in ascending order within MPRS"
+        },
+        "grot.formatting.alignColumns": {
+          "type": "boolean",
+          "default": true,
+          "description": "Align rotation data columns when formatting"
+        },
+        "grot.formatting.decimalPlaces": {
+          "type": "number",
+          "default": 4,
+          "description": "Number of decimal places for rotation values"
+        },
+        "grot.treeView.showDisabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show disabled rotations in tree view"
+        },
+        "grot.hover.showPlateInfo": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show plate information on hover"
+        }
+      }
+    },
+    "snippets": [
+      {
+        "language": "grot",
+        "path": "./snippets/grot.json"
+      }
+    ],
+    "colors": [
+      {
+        "id": "grot.mprsHeader",
+        "description": "Color for MPRS headers in editor",
+        "defaults": {
+          "dark": "#4EC9B0",
+          "light": "#008080"
+        }
+      },
+      {
+        "id": "grot.attribute",
+        "description": "Color for @ attributes",
+        "defaults": {
+          "dark": "#DCDCAA",
+          "light": "#795E26"
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "eslint": "^8.54.0",
+    "typescript": "^5.3.0",
+    "@vscode/vsce": "^2.22.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gplates-community/grot-vscode-extension"
+  },
+  "license": "MIT"
+}

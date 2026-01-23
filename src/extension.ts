@@ -1,0 +1,1040 @@
+import * as vscode from 'vscode';
+
+// ============================================================================
+// Types and Interfaces
+// ============================================================================
+
+interface Rotation {
+    line: number;
+    plateId1: number;
+    age: number;
+    latitude: number;
+    longitude: number;
+    angle: number;
+    plateId2: number;
+    metadata: Map<string, string>;
+    disabled: boolean;
+    rawLine: string;
+}
+
+interface MPRS {
+    line: number;
+    plateId: number;
+    code: string;
+    name: string;
+    platePair: string;
+    metadata: Map<string, string>;
+    rotations: Rotation[];
+}
+
+interface GrotDocument {
+    header: Map<string, string>;
+    contributors: string[];
+    timeScales: string[];
+    mprsSequences: MPRS[];
+}
+
+// ============================================================================
+// Parser
+// ============================================================================
+
+class GrotParser {
+    private static readonly MPRS_PATTERN = /^>\s*@MPRS:pid"(\d+)"\s*@MPRS:code"([^"]+)"\s*@MPRS:name"([^"]+)"/;
+    private static readonly MPRS_COMPACT_PATTERN = /^>\s*@MPRS"(\d+)\s*\|\s*([^|]+)\s*\|\s*([^"]+)"/;
+    private static readonly ROTATION_PATTERN = /^\s*(\d{1,4})\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(\d{1,4})/;
+    private static readonly DISABLED_ROTATION_PATTERN = /^#\s*(\d{1,4})\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(\d{1,4})/;
+    private static readonly ATTRIBUTE_PATTERN = /@([A-Z][A-Za-z0-9_:]*)"([^"]*)"/g;
+    private static readonly HEADER_ATTRIBUTE_PATTERN = /^@([A-Z][A-Za-z0-9_:]+)"([^"]*)"/;
+    private static readonly PP_PATTERN = /@PP"([^"]+)"/;
+
+    static parse(document: vscode.TextDocument): GrotDocument {
+        const result: GrotDocument = {
+            header: new Map(),
+            contributors: [],
+            timeScales: [],
+            mprsSequences: []
+        };
+
+        let currentMPRS: MPRS | null = null;
+        let inHeader = true;
+
+        for (let i = 0; i < document.lineCount; i++) {
+            const line = document.lineAt(i).text;
+            const trimmedLine = line.trim();
+
+            // Skip empty lines
+            if (!trimmedLine) continue;
+
+            // Check for header attributes
+            if (trimmedLine.startsWith('@') && inHeader) {
+                const match = trimmedLine.match(this.HEADER_ATTRIBUTE_PATTERN);
+                if (match) {
+                    result.header.set(match[1], match[2]);
+                    if (match[1].startsWith('DC:contributor')) {
+                        result.contributors.push(match[2]);
+                    } else if (match[1] === 'GEOTIMESCALE') {
+                        result.timeScales.push(match[2]);
+                    }
+                }
+                continue;
+            }
+
+            // Check for MPRS header
+            if (trimmedLine.startsWith('>')) {
+                inHeader = false;
+                const mprsMatch = trimmedLine.match(this.MPRS_PATTERN) || 
+                                  trimmedLine.match(this.MPRS_COMPACT_PATTERN);
+                
+                if (mprsMatch) {
+                    if (currentMPRS) {
+                        result.mprsSequences.push(currentMPRS);
+                    }
+                    
+                    const metadata = this.parseAttributes(trimmedLine);
+                    const ppMatch = trimmedLine.match(this.PP_PATTERN);
+                    
+                    currentMPRS = {
+                        line: i,
+                        plateId: parseInt(mprsMatch[1]),
+                        code: mprsMatch[2].trim(),
+                        name: mprsMatch[3].trim(),
+                        platePair: ppMatch ? ppMatch[1] : '',
+                        metadata: metadata,
+                        rotations: []
+                    };
+                } else if (currentMPRS) {
+                    // Additional MPRS header line with metadata
+                    const additionalMetadata = this.parseAttributes(trimmedLine);
+                    additionalMetadata.forEach((value, key) => {
+                        currentMPRS!.metadata.set(key, value);
+                    });
+                    const ppMatch = trimmedLine.match(this.PP_PATTERN);
+                    if (ppMatch) {
+                        currentMPRS.platePair = ppMatch[1];
+                    }
+                }
+                continue;
+            }
+
+            // Check for rotation line
+            const rotationMatch = trimmedLine.match(this.ROTATION_PATTERN);
+            if (rotationMatch && currentMPRS) {
+                const rotation: Rotation = {
+                    line: i,
+                    plateId1: parseInt(rotationMatch[1]),
+                    age: parseFloat(rotationMatch[2]),
+                    latitude: parseFloat(rotationMatch[3]),
+                    longitude: parseFloat(rotationMatch[4]),
+                    angle: parseFloat(rotationMatch[5]),
+                    plateId2: parseInt(rotationMatch[6]),
+                    metadata: this.parseAttributes(trimmedLine),
+                    disabled: false,
+                    rawLine: line
+                };
+                currentMPRS.rotations.push(rotation);
+                continue;
+            }
+
+            // Check for disabled rotation
+            const disabledMatch = trimmedLine.match(this.DISABLED_ROTATION_PATTERN);
+            if (disabledMatch && currentMPRS) {
+                const rotation: Rotation = {
+                    line: i,
+                    plateId1: parseInt(disabledMatch[1]),
+                    age: parseFloat(disabledMatch[2]),
+                    latitude: parseFloat(disabledMatch[3]),
+                    longitude: parseFloat(disabledMatch[4]),
+                    angle: parseFloat(disabledMatch[5]),
+                    plateId2: parseInt(disabledMatch[6]),
+                    metadata: this.parseAttributes(trimmedLine),
+                    disabled: true,
+                    rawLine: line
+                };
+                currentMPRS.rotations.push(rotation);
+            }
+        }
+
+        // Don't forget the last MPRS
+        if (currentMPRS) {
+            result.mprsSequences.push(currentMPRS);
+        }
+
+        return result;
+    }
+
+    private static parseAttributes(line: string): Map<string, string> {
+        const attributes = new Map<string, string>();
+        let match;
+        const pattern = new RegExp(this.ATTRIBUTE_PATTERN);
+        while ((match = pattern.exec(line)) !== null) {
+            attributes.set(match[1], match[2]);
+        }
+        return attributes;
+    }
+}
+
+// ============================================================================
+// Tree View Provider
+// ============================================================================
+
+class GrotTreeItem extends vscode.TreeItem {
+    constructor(
+        public readonly label: string,
+        public readonly collapsibleState: vscode.TreeItemCollapsibleState,
+        public readonly lineNumber?: number,
+        public readonly contextValue?: string
+    ) {
+        super(label, collapsibleState);
+        if (lineNumber !== undefined) {
+            this.command = {
+                command: 'grot.goToLine',
+                title: 'Go to Line',
+                arguments: [lineNumber]
+            };
+        }
+    }
+}
+
+class GrotTreeDataProvider implements vscode.TreeDataProvider<GrotTreeItem> {
+    private _onDidChangeTreeData = new vscode.EventEmitter<GrotTreeItem | undefined | null | void>();
+    readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+
+    private document: GrotDocument | null = null;
+
+    refresh(): void {
+        const editor = vscode.window.activeTextEditor;
+        if (editor && editor.document.languageId === 'grot') {
+            this.document = GrotParser.parse(editor.document);
+        } else {
+            this.document = null;
+        }
+        this._onDidChangeTreeData.fire();
+    }
+
+    getTreeItem(element: GrotTreeItem): vscode.TreeItem {
+        return element;
+    }
+
+    getChildren(element?: GrotTreeItem): Thenable<GrotTreeItem[]> {
+        if (!this.document) {
+            return Promise.resolve([]);
+        }
+
+        if (!element) {
+            // Root level: show Header and MPRS sequences
+            const items: GrotTreeItem[] = [];
+
+            // Header section
+            if (this.document.header.size > 0) {
+                const headerItem = new GrotTreeItem(
+                    '📄 Header',
+                    vscode.TreeItemCollapsibleState.Collapsed,
+                    0,
+                    'header'
+                );
+                headerItem.iconPath = new vscode.ThemeIcon('file-text');
+                items.push(headerItem);
+            }
+
+            // MPRS sequences
+            for (const mprs of this.document.mprsSequences) {
+                const mprsItem = new GrotTreeItem(
+                    `🌍 ${mprs.code} (${mprs.plateId}) - ${mprs.name}`,
+                    vscode.TreeItemCollapsibleState.Collapsed,
+                    mprs.line,
+                    'mprs'
+                );
+                mprsItem.description = `${mprs.rotations.length} rotations`;
+                mprsItem.tooltip = `Plate ID: ${mprs.plateId}\nCode: ${mprs.code}\nName: ${mprs.name}\nPlate Pair: ${mprs.platePair}\nRotations: ${mprs.rotations.length}`;
+                mprsItem.iconPath = new vscode.ThemeIcon('globe');
+                items.push(mprsItem);
+            }
+
+            return Promise.resolve(items);
+        }
+
+        // Children of header
+        if (element.contextValue === 'header') {
+            const items: GrotTreeItem[] = [];
+            this.document.header.forEach((value, key) => {
+                const item = new GrotTreeItem(
+                    `${key}: ${value.substring(0, 50)}${value.length > 50 ? '...' : ''}`,
+                    vscode.TreeItemCollapsibleState.None
+                );
+                item.tooltip = `${key}: ${value}`;
+                item.iconPath = new vscode.ThemeIcon('symbol-property');
+                items.push(item);
+            });
+            return Promise.resolve(items);
+        }
+
+        // Children of MPRS
+        if (element.contextValue === 'mprs' && element.lineNumber !== undefined) {
+            const mprs = this.document.mprsSequences.find(m => m.line === element.lineNumber);
+            if (mprs) {
+                const showDisabled = vscode.workspace.getConfiguration('grot').get('treeView.showDisabled', true);
+                const items: GrotTreeItem[] = [];
+                
+                for (const rotation of mprs.rotations) {
+                    if (!showDisabled && rotation.disabled) continue;
+                    
+                    const status = rotation.disabled ? '⊘' : '●';
+                    const label = `${status} ${rotation.age.toFixed(2)} Ma`;
+                    const item = new GrotTreeItem(
+                        label,
+                        vscode.TreeItemCollapsibleState.None,
+                        rotation.line,
+                        'rotation'
+                    );
+                    item.description = `(${rotation.latitude.toFixed(2)}, ${rotation.longitude.toFixed(2)}) ${rotation.angle.toFixed(2)}°`;
+                    item.tooltip = `Age: ${rotation.age} Ma\nPole: (${rotation.latitude}, ${rotation.longitude})\nAngle: ${rotation.angle}°\nFixed Plate: ${rotation.plateId2}${rotation.disabled ? '\n[DISABLED]' : ''}`;
+                    item.iconPath = new vscode.ThemeIcon(rotation.disabled ? 'circle-slash' : 'circle-filled');
+                    items.push(item);
+                }
+                return Promise.resolve(items);
+            }
+        }
+
+        return Promise.resolve([]);
+    }
+}
+
+// ============================================================================
+// Hover Provider
+// ============================================================================
+
+class GrotHoverProvider implements vscode.HoverProvider {
+    provideHover(document: vscode.TextDocument, position: vscode.Position): vscode.ProviderResult<vscode.Hover> {
+        const line = document.lineAt(position.line).text;
+        
+        // Check if it's a rotation line
+        const rotationMatch = line.match(/^\s*#?\s*(\d{1,4})\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(\d{1,4})/);
+        if (rotationMatch) {
+            const markdown = new vscode.MarkdownString();
+            markdown.appendMarkdown(`### Rotation Parameters\n\n`);
+            markdown.appendMarkdown(`| Parameter | Value |\n`);
+            markdown.appendMarkdown(`|-----------|-------|\n`);
+            markdown.appendMarkdown(`| **Moving Plate ID** | ${rotationMatch[1]} |\n`);
+            markdown.appendMarkdown(`| **Age** | ${rotationMatch[2]} Ma |\n`);
+            markdown.appendMarkdown(`| **Pole Latitude** | ${rotationMatch[3]}° |\n`);
+            markdown.appendMarkdown(`| **Pole Longitude** | ${rotationMatch[4]}° |\n`);
+            markdown.appendMarkdown(`| **Rotation Angle** | ${rotationMatch[5]}° |\n`);
+            markdown.appendMarkdown(`| **Fixed Plate ID** | ${rotationMatch[6]} |\n`);
+            
+            // Check for attributes
+            const attributes = this.extractAttributes(line);
+            if (attributes.size > 0) {
+                markdown.appendMarkdown(`\n### Metadata\n\n`);
+                attributes.forEach((value, key) => {
+                    markdown.appendMarkdown(`- **${key}**: ${value}\n`);
+                });
+            }
+            
+            if (line.trim().startsWith('#')) {
+                markdown.appendMarkdown(`\n⚠️ *This rotation is disabled*`);
+            }
+            
+            return new vscode.Hover(markdown);
+        }
+        
+        // Check for MPRS header
+        if (line.trim().startsWith('>')) {
+            const pidMatch = line.match(/@MPRS:pid"(\d+)"/);
+            const codeMatch = line.match(/@MPRS:code"([^"]+)"/);
+            const nameMatch = line.match(/@MPRS:name"([^"]+)"/);
+            
+            if (pidMatch || codeMatch || nameMatch) {
+                const markdown = new vscode.MarkdownString();
+                markdown.appendMarkdown(`### Moving Plate Rotation Sequence\n\n`);
+                if (pidMatch) markdown.appendMarkdown(`- **Plate ID**: ${pidMatch[1]}\n`);
+                if (codeMatch) markdown.appendMarkdown(`- **Code**: ${codeMatch[1]}\n`);
+                if (nameMatch) markdown.appendMarkdown(`- **Name**: ${nameMatch[1]}\n`);
+                
+                const attributes = this.extractAttributes(line);
+                if (attributes.size > 0) {
+                    markdown.appendMarkdown(`\n### Additional Metadata\n\n`);
+                    attributes.forEach((value, key) => {
+                        if (!key.startsWith('MPRS:')) {
+                            markdown.appendMarkdown(`- **${key}**: ${value}\n`);
+                        }
+                    });
+                }
+                
+                return new vscode.Hover(markdown);
+            }
+        }
+        
+        // Check for header attribute
+        const headerMatch = line.match(/^@([A-Z][A-Za-z0-9_:]+)"([^"]*)"/);
+        if (headerMatch) {
+            const attrDescriptions: { [key: string]: string } = {
+                'GPLATESROTATIONFILE:version': 'GPlates rotation file format version',
+                'DC:namespace': 'Dublin Core namespace URI',
+                'DC:title': 'Document title',
+                'DC:creator:name': 'Name of the file creator',
+                'DC:creator:email': 'Email of the file creator',
+                'DC:rights:license': 'License for the data',
+                'DC:date:created': 'File creation date',
+                'DC:date:modified': 'Last modification date',
+                'DC:coverage:temporal': 'Temporal coverage of the data',
+                'DC:description': 'Description of the rotation model',
+                'DC:contributor': 'Contributor information',
+                'GEOTIMESCALE': 'Geological time scale reference',
+                'BIBINFO:bibfile': 'Path to bibliography file',
+                'GPML:namespace': 'GPlates Markup Language namespace'
+            };
+            
+            const markdown = new vscode.MarkdownString();
+            markdown.appendMarkdown(`### @${headerMatch[1]}\n\n`);
+            
+            const description = attrDescriptions[headerMatch[1]];
+            if (description) {
+                markdown.appendMarkdown(`*${description}*\n\n`);
+            }
+            
+            markdown.appendMarkdown(`**Value**: ${headerMatch[2]}`);
+            return new vscode.Hover(markdown);
+        }
+        
+        return null;
+    }
+    
+    private extractAttributes(line: string): Map<string, string> {
+        const attributes = new Map<string, string>();
+        const pattern = /@([A-Z][A-Za-z0-9_:]*)"([^"]*)"/g;
+        let match;
+        while ((match = pattern.exec(line)) !== null) {
+            attributes.set(match[1], match[2]);
+        }
+        return attributes;
+    }
+}
+
+// ============================================================================
+// Completion Provider
+// ============================================================================
+
+class GrotCompletionProvider implements vscode.CompletionItemProvider {
+    private static readonly ATTRIBUTES = [
+        { name: '@C', description: 'Free-form comment', snippet: '@C"${1:comment}"' },
+        { name: '@REF', description: 'Citation key for bibliographic reference', snippet: '@REF"${1:reference}"' },
+        { name: '@DOI', description: 'Digital Object Identifier', snippet: '@DOI"${1:10.xxxx/xxxxx}"' },
+        { name: '@AU', description: 'Author ID', snippet: '@AU"${1:author_id}"' },
+        { name: '@PP', description: 'Plate pair (e.g., SAM-AFR)', snippet: '@PP"${1:MOV}-${2:FIX}"' },
+        { name: '@GTS', description: 'Geological time scale ID', snippet: '@GTS"${1:timescale_id}"' },
+        { name: '@CHRONID', description: 'Magnetic anomaly chron ID', snippet: '@CHRONID"${1:C}${2:number}"' },
+        { name: '@T', description: 'Modification timestamp', snippet: '@T"${1:$CURRENT_YEAR}-${2:$CURRENT_MONTH}-${3:$CURRENT_DATE}"' },
+        { name: '@ABSAGE', description: 'Absolute age flag', snippet: '@ABSAGE' },
+        { name: '@MPRS:pid', description: 'Moving plate ID', snippet: '@MPRS:pid"${1:id}"' },
+        { name: '@MPRS:code', description: 'Moving plate code', snippet: '@MPRS:code"${1:CODE}"' },
+        { name: '@MPRS:name', description: 'Moving plate name', snippet: '@MPRS:name"${1:Plate Name}"' }
+    ];
+
+    private static readonly HEADER_ATTRIBUTES = [
+        { name: '@GPLATESROTATIONFILE:version', description: 'File format version', snippet: '@GPLATESROTATIONFILE:version"1.0"' },
+        { name: '@DC:namespace', description: 'Dublin Core namespace', snippet: '@DC:namespace"http://purl.org/dc/elements/1.1/"' },
+        { name: '@DC:title', description: 'Document title', snippet: '@DC:title"${1:GPlates rotation file}"' },
+        { name: '@DC:creator:name', description: 'Creator name', snippet: '@DC:creator:name"${1:Your Name}"' },
+        { name: '@DC:creator:email', description: 'Creator email', snippet: '@DC:creator:email"${1:email@example.com}"' },
+        { name: '@DC:rights:license', description: 'License', snippet: '@DC:rights:license"${1:CC BY-NC-SA 4.0}"' },
+        { name: '@DC:date:created', description: 'Creation date', snippet: '@DC:date:created"${1:$CURRENT_YEAR-$CURRENT_MONTH-$CURRENT_DATE}"' },
+        { name: '@DC:coverage:temporal', description: 'Temporal coverage', snippet: '@DC:coverage:temporal"${1:0}-${2:600} Ma"' },
+        { name: '@DC:description', description: 'Description', snippet: '@DC:description"""${1:Description of the rotation model}"""' },
+        { name: '@DC:contributor', description: 'Contributor', snippet: '@DC:contributor"${1:ID} | ${2:Name} | ${3:email@example.com} | ${4:URL} | ${5:Institution}"' },
+        { name: '@GEOTIMESCALE', description: 'Time scale definition', snippet: '@GEOTIMESCALE"${1:ID} | ${2:DOI} | ${3:CiteKey} | ${4:Description}"' },
+        { name: '@GPML:namespace', description: 'GPML namespace', snippet: '@GPML:namespace"http://www.earthbyte.org/Resources/GPGIM/public/"' }
+    ];
+
+    provideCompletionItems(
+        document: vscode.TextDocument,
+        position: vscode.Position
+    ): vscode.ProviderResult<vscode.CompletionItem[]> {
+        const linePrefix = document.lineAt(position).text.substr(0, position.character);
+        const items: vscode.CompletionItem[] = [];
+
+        // Check if we're in the header (before any MPRS)
+        let inHeader = true;
+        for (let i = 0; i < position.line; i++) {
+            if (document.lineAt(i).text.trim().startsWith('>')) {
+                inHeader = false;
+                break;
+            }
+        }
+
+        // Suggest @ if starting a new attribute
+        if (linePrefix.endsWith('@') || linePrefix.match(/\s@$/)) {
+            const attributes = inHeader ? GrotCompletionProvider.HEADER_ATTRIBUTES : GrotCompletionProvider.ATTRIBUTES;
+            
+            for (const attr of attributes) {
+                const item = new vscode.CompletionItem(attr.name, vscode.CompletionItemKind.Property);
+                item.detail = attr.description;
+                item.insertText = new vscode.SnippetString(attr.snippet.substring(1)); // Remove leading @
+                items.push(item);
+            }
+        }
+
+        // Suggest MPRS template
+        if (linePrefix.trim() === '>' || linePrefix.trim() === '') {
+            const mprsItem = new vscode.CompletionItem('New MPRS Header', vscode.CompletionItemKind.Snippet);
+            mprsItem.detail = 'Insert a new Moving Plate Rotation Sequence header';
+            mprsItem.insertText = new vscode.SnippetString(
+                '> @MPRS:pid"${1:plateId}" @MPRS:code"${2:CODE}" @MPRS:name"${3:Plate Name}"\n' +
+                '> @PP"${2:CODE}-${4:FIX}" @C"${5:comment}"'
+            );
+            items.push(mprsItem);
+
+            // Rotation line template
+            const rotItem = new vscode.CompletionItem('New Rotation', vscode.CompletionItemKind.Snippet);
+            rotItem.detail = 'Insert a new rotation line';
+            rotItem.insertText = new vscode.SnippetString(
+                '${1:001}  ${2:0.0000}    ${3:0.0000}   ${4:0.0000}    ${5:0.0000}    ${6:000}   @C"${7:comment}"'
+            );
+            items.push(rotItem);
+        }
+
+        return items;
+    }
+}
+
+// ============================================================================
+// Document Symbol Provider (Outline)
+// ============================================================================
+
+class GrotDocumentSymbolProvider implements vscode.DocumentSymbolProvider {
+    provideDocumentSymbols(document: vscode.TextDocument): vscode.ProviderResult<vscode.DocumentSymbol[]> {
+        const grotDoc = GrotParser.parse(document);
+        const symbols: vscode.DocumentSymbol[] = [];
+
+        // Header section
+        if (grotDoc.header.size > 0) {
+            const headerRange = new vscode.Range(0, 0, 0, 0);
+            const headerSymbol = new vscode.DocumentSymbol(
+                'Header',
+                'File metadata',
+                vscode.SymbolKind.Namespace,
+                headerRange,
+                headerRange
+            );
+            symbols.push(headerSymbol);
+        }
+
+        // MPRS sequences
+        for (const mprs of grotDoc.mprsSequences) {
+            const startLine = mprs.line;
+            const endLine = mprs.rotations.length > 0 
+                ? mprs.rotations[mprs.rotations.length - 1].line 
+                : mprs.line;
+            
+            const range = new vscode.Range(startLine, 0, endLine, document.lineAt(endLine).text.length);
+            const selectionRange = new vscode.Range(startLine, 0, startLine, document.lineAt(startLine).text.length);
+            
+            const mprsSymbol = new vscode.DocumentSymbol(
+                `${mprs.code} (${mprs.plateId})`,
+                mprs.name,
+                vscode.SymbolKind.Class,
+                range,
+                selectionRange
+            );
+
+            // Add rotations as children
+            for (const rotation of mprs.rotations) {
+                const rotRange = new vscode.Range(rotation.line, 0, rotation.line, document.lineAt(rotation.line).text.length);
+                const rotSymbol = new vscode.DocumentSymbol(
+                    `${rotation.age} Ma`,
+                    `(${rotation.latitude}, ${rotation.longitude}) ${rotation.angle}°`,
+                    rotation.disabled ? vscode.SymbolKind.Null : vscode.SymbolKind.Field,
+                    rotRange,
+                    rotRange
+                );
+                mprsSymbol.children.push(rotSymbol);
+            }
+
+            symbols.push(mprsSymbol);
+        }
+
+        return symbols;
+    }
+}
+
+// ============================================================================
+// Diagnostics Provider
+// ============================================================================
+
+class GrotDiagnosticsProvider {
+    private diagnosticCollection: vscode.DiagnosticCollection;
+
+    constructor() {
+        this.diagnosticCollection = vscode.languages.createDiagnosticCollection('grot');
+    }
+
+    updateDiagnostics(document: vscode.TextDocument): void {
+        if (document.languageId !== 'grot') {
+            return;
+        }
+
+        const config = vscode.workspace.getConfiguration('grot');
+        if (!config.get('validation.enabled', true)) {
+            this.diagnosticCollection.clear();
+            return;
+        }
+
+        const diagnostics: vscode.Diagnostic[] = [];
+        const grotDoc = GrotParser.parse(document);
+
+        // Check for required header attributes
+        const requiredHeaders = ['GPLATESROTATIONFILE:version'];
+        for (const required of requiredHeaders) {
+            if (!grotDoc.header.has(required)) {
+                diagnostics.push(new vscode.Diagnostic(
+                    new vscode.Range(0, 0, 0, 1),
+                    `Missing required header attribute: @${required}`,
+                    vscode.DiagnosticSeverity.Warning
+                ));
+            }
+        }
+
+        // Validate MPRS sequences
+        for (const mprs of grotDoc.mprsSequences) {
+            // Check for consistent plate IDs
+            if (config.get('validation.checkPlateIds', true)) {
+                for (const rotation of mprs.rotations) {
+                    if (rotation.plateId1 !== mprs.plateId) {
+                        diagnostics.push(new vscode.Diagnostic(
+                            new vscode.Range(rotation.line, 0, rotation.line, 5),
+                            `Plate ID ${rotation.plateId1} doesn't match MPRS plate ID ${mprs.plateId}`,
+                            vscode.DiagnosticSeverity.Error
+                        ));
+                    }
+                }
+            }
+
+            // Check age sequence
+            if (config.get('validation.checkAgeSequence', true)) {
+                let prevAge = -Infinity;
+                for (const rotation of mprs.rotations) {
+                    if (rotation.disabled) continue;
+                    if (rotation.age < prevAge) {
+                        diagnostics.push(new vscode.Diagnostic(
+                            new vscode.Range(rotation.line, 0, rotation.line, document.lineAt(rotation.line).text.length),
+                            `Age ${rotation.age} Ma is out of sequence (previous: ${prevAge} Ma)`,
+                            vscode.DiagnosticSeverity.Warning
+                        ));
+                    }
+                    prevAge = rotation.age;
+                }
+            }
+
+            // Check for missing 0 Ma rotation
+            const hasZeroAge = mprs.rotations.some(r => !r.disabled && r.age === 0);
+            if (!hasZeroAge && mprs.rotations.length > 0) {
+                diagnostics.push(new vscode.Diagnostic(
+                    new vscode.Range(mprs.line, 0, mprs.line, document.lineAt(mprs.line).text.length),
+                    `MPRS ${mprs.code} is missing a 0 Ma (present-day) rotation`,
+                    vscode.DiagnosticSeverity.Hint
+                ));
+            }
+
+            // Check for duplicate ages
+            const ages = new Map<number, number[]>();
+            for (const rotation of mprs.rotations) {
+                if (rotation.disabled) continue;
+                if (!ages.has(rotation.age)) {
+                    ages.set(rotation.age, []);
+                }
+                ages.get(rotation.age)!.push(rotation.line);
+            }
+            ages.forEach((lines, age) => {
+                if (lines.length > 1) {
+                    for (const line of lines) {
+                        diagnostics.push(new vscode.Diagnostic(
+                            new vscode.Range(line, 0, line, document.lineAt(line).text.length),
+                            `Duplicate age ${age} Ma in MPRS ${mprs.code}`,
+                            vscode.DiagnosticSeverity.Warning
+                        ));
+                    }
+                }
+            });
+        }
+
+        this.diagnosticCollection.set(document.uri, diagnostics);
+    }
+
+    dispose(): void {
+        this.diagnosticCollection.dispose();
+    }
+}
+
+// ============================================================================
+// Formatting Provider
+// ============================================================================
+
+class GrotFormattingProvider implements vscode.DocumentFormattingEditProvider {
+    provideDocumentFormattingEdits(document: vscode.TextDocument): vscode.ProviderResult<vscode.TextEdit[]> {
+        const edits: vscode.TextEdit[] = [];
+        const config = vscode.workspace.getConfiguration('grot');
+        const alignColumns = config.get('formatting.alignColumns', true);
+        const decimalPlaces = config.get('formatting.decimalPlaces', 4);
+
+        const rotationPattern = /^(\s*)(#?\s*)(\d{1,4})\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(\d{1,4})(.*)$/;
+
+        for (let i = 0; i < document.lineCount; i++) {
+            const line = document.lineAt(i);
+            const match = line.text.match(rotationPattern);
+            
+            if (match && alignColumns) {
+                const [, indent, prefix, pid1, age, lat, lon, angle, pid2, rest] = match;
+                
+                const formattedAge = parseFloat(age).toFixed(decimalPlaces).padStart(10);
+                const formattedLat = parseFloat(lat).toFixed(decimalPlaces).padStart(10);
+                const formattedLon = parseFloat(lon).toFixed(decimalPlaces).padStart(10);
+                const formattedAngle = parseFloat(angle).toFixed(decimalPlaces).padStart(10);
+                
+                const newLine = `${prefix}${pid1.padStart(3)}  ${formattedAge}  ${formattedLat}  ${formattedLon}  ${formattedAngle}  ${pid2.padStart(3)}${rest ? '  ' + rest.trim() : ''}`;
+                
+                if (newLine !== line.text) {
+                    edits.push(vscode.TextEdit.replace(line.range, newLine));
+                }
+            }
+        }
+
+        return edits;
+    }
+}
+
+// ============================================================================
+// Commands
+// ============================================================================
+
+async function showStatistics(): Promise<void> {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.document.languageId !== 'grot') {
+        vscode.window.showErrorMessage('No .grot file is open');
+        return;
+    }
+
+    const grotDoc = GrotParser.parse(editor.document);
+    
+    let totalRotations = 0;
+    let disabledRotations = 0;
+    let minAge = Infinity;
+    let maxAge = -Infinity;
+    
+    for (const mprs of grotDoc.mprsSequences) {
+        totalRotations += mprs.rotations.length;
+        for (const rot of mprs.rotations) {
+            if (rot.disabled) disabledRotations++;
+            if (!rot.disabled) {
+                minAge = Math.min(minAge, rot.age);
+                maxAge = Math.max(maxAge, rot.age);
+            }
+        }
+    }
+
+    const panel = vscode.window.createWebviewPanel(
+        'grotStatistics',
+        'GROT File Statistics',
+        vscode.ViewColumn.Beside,
+        {}
+    );
+
+    panel.webview.html = `
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: var(--vscode-font-family); padding: 20px; }
+        h1 { color: var(--vscode-foreground); }
+        .stat { margin: 10px 0; padding: 10px; background: var(--vscode-editor-background); border-radius: 5px; }
+        .stat-label { font-weight: bold; color: var(--vscode-textLink-foreground); }
+        .stat-value { font-size: 1.5em; }
+        table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+        th, td { border: 1px solid var(--vscode-panel-border); padding: 8px; text-align: left; }
+        th { background: var(--vscode-editor-selectionBackground); }
+    </style>
+</head>
+<body>
+    <h1>📊 GROT File Statistics</h1>
+    
+    <div class="stat">
+        <span class="stat-label">Total MPRS Sequences:</span>
+        <span class="stat-value">${grotDoc.mprsSequences.length}</span>
+    </div>
+    
+    <div class="stat">
+        <span class="stat-label">Total Rotations:</span>
+        <span class="stat-value">${totalRotations}</span>
+        <span>(${disabledRotations} disabled)</span>
+    </div>
+    
+    <div class="stat">
+        <span class="stat-label">Time Range:</span>
+        <span class="stat-value">${minAge === Infinity ? 'N/A' : minAge} - ${maxAge === -Infinity ? 'N/A' : maxAge} Ma</span>
+    </div>
+    
+    <h2>MPRS Summary</h2>
+    <table>
+        <tr>
+            <th>Plate ID</th>
+            <th>Code</th>
+            <th>Name</th>
+            <th>Rotations</th>
+            <th>Age Range</th>
+        </tr>
+        ${grotDoc.mprsSequences.map(mprs => {
+            const ages = mprs.rotations.filter(r => !r.disabled).map(r => r.age);
+            const ageRange = ages.length > 0 ? `${Math.min(...ages)} - ${Math.max(...ages)}` : 'N/A';
+            return `<tr>
+                <td>${mprs.plateId}</td>
+                <td>${mprs.code}</td>
+                <td>${mprs.name}</td>
+                <td>${mprs.rotations.length}</td>
+                <td>${ageRange} Ma</td>
+            </tr>`;
+        }).join('')}
+    </table>
+</body>
+</html>`;
+}
+
+async function goToMPRS(): Promise<void> {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.document.languageId !== 'grot') {
+        return;
+    }
+
+    const grotDoc = GrotParser.parse(editor.document);
+    
+    const items = grotDoc.mprsSequences.map(mprs => ({
+        label: `${mprs.code} (${mprs.plateId})`,
+        description: mprs.name,
+        detail: `${mprs.rotations.length} rotations`,
+        line: mprs.line
+    }));
+
+    const selected = await vscode.window.showQuickPick(items, {
+        placeHolder: 'Select MPRS to navigate to...'
+    });
+
+    if (selected) {
+        const position = new vscode.Position(selected.line, 0);
+        editor.selection = new vscode.Selection(position, position);
+        editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
+    }
+}
+
+async function toggleRotation(): Promise<void> {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.document.languageId !== 'grot') {
+        return;
+    }
+
+    const line = editor.document.lineAt(editor.selection.active.line);
+    const text = line.text;
+
+    // Check if it's a rotation line
+    const rotationPattern = /^(\s*)(#?)(\s*)(\d{1,4}\s+.*)$/;
+    const match = text.match(rotationPattern);
+
+    if (match) {
+        const [, indent, hash, space, rotation] = match;
+        let newText: string;
+        
+        if (hash) {
+            // Enable: remove #
+            newText = `${indent}${rotation}`;
+        } else {
+            // Disable: add #
+            newText = `${indent}#${rotation}`;
+        }
+
+        await editor.edit(editBuilder => {
+            editBuilder.replace(line.range, newText);
+        });
+    }
+}
+
+async function addRotation(): Promise<void> {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.document.languageId !== 'grot') {
+        return;
+    }
+
+    // Find current MPRS context
+    const currentLine = editor.selection.active.line;
+    let plateId = '001';
+    let fixedPlateId = '000';
+    
+    for (let i = currentLine; i >= 0; i--) {
+        const line = editor.document.lineAt(i).text;
+        const mprsMatch = line.match(/@MPRS:pid"(\d+)"/);
+        if (mprsMatch) {
+            plateId = mprsMatch[1].padStart(3, '0');
+            break;
+        }
+        const rotMatch = line.match(/^\s*(\d{1,4})\s+.*\s+(\d{1,4})/);
+        if (rotMatch) {
+            plateId = rotMatch[1].padStart(3, '0');
+            fixedPlateId = rotMatch[2].padStart(3, '0');
+        }
+    }
+
+    const age = await vscode.window.showInputBox({
+        prompt: 'Enter age (Ma)',
+        value: '0.0'
+    });
+    if (!age) return;
+
+    const lat = await vscode.window.showInputBox({
+        prompt: 'Enter pole latitude',
+        value: '0.0'
+    });
+    if (!lat) return;
+
+    const lon = await vscode.window.showInputBox({
+        prompt: 'Enter pole longitude',
+        value: '0.0'
+    });
+    if (!lon) return;
+
+    const angle = await vscode.window.showInputBox({
+        prompt: 'Enter rotation angle',
+        value: '0.0'
+    });
+    if (!angle) return;
+
+    const comment = await vscode.window.showInputBox({
+        prompt: 'Enter comment (optional)',
+        value: ''
+    });
+
+    const rotationLine = `${plateId}  ${parseFloat(age).toFixed(4).padStart(10)}  ${parseFloat(lat).toFixed(4).padStart(10)}  ${parseFloat(lon).toFixed(4).padStart(10)}  ${parseFloat(angle).toFixed(4).padStart(10)}  ${fixedPlateId}${comment ? `  @C"${comment}"` : ''}`;
+
+    await editor.edit(editBuilder => {
+        const insertPosition = new vscode.Position(currentLine + 1, 0);
+        editBuilder.insert(insertPosition, rotationLine + '\n');
+    });
+}
+
+async function exportToCSV(): Promise<void> {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.document.languageId !== 'grot') {
+        return;
+    }
+
+    const grotDoc = GrotParser.parse(editor.document);
+    
+    const items = grotDoc.mprsSequences.map(mprs => ({
+        label: `${mprs.code} (${mprs.plateId})`,
+        description: mprs.name,
+        mprs: mprs
+    }));
+
+    const selected = await vscode.window.showQuickPick(items, {
+        placeHolder: 'Select MPRS to export...'
+    });
+
+    if (!selected) return;
+
+    const csv = [
+        'PlateID1,Age,Latitude,Longitude,Angle,PlateID2,Disabled,Comment,Reference'
+    ];
+
+    for (const rot of selected.mprs.rotations) {
+        const comment = rot.metadata.get('C') || '';
+        const ref = rot.metadata.get('REF') || '';
+        csv.push(`${rot.plateId1},${rot.age},${rot.latitude},${rot.longitude},${rot.angle},${rot.plateId2},${rot.disabled},${comment.replace(/,/g, ';')},${ref.replace(/,/g, ';')}`);
+    }
+
+    const doc = await vscode.workspace.openTextDocument({
+        content: csv.join('\n'),
+        language: 'csv'
+    });
+    await vscode.window.showTextDocument(doc);
+}
+
+// ============================================================================
+// Extension Activation
+// ============================================================================
+
+export function activate(context: vscode.ExtensionContext): void {
+    console.log('GROT Editor extension is now active');
+
+    // Register Tree View
+    const treeDataProvider = new GrotTreeDataProvider();
+    vscode.window.registerTreeDataProvider('grotExplorer', treeDataProvider);
+
+    // Register providers
+    context.subscriptions.push(
+        vscode.languages.registerHoverProvider('grot', new GrotHoverProvider()),
+        vscode.languages.registerCompletionItemProvider('grot', new GrotCompletionProvider(), '@'),
+        vscode.languages.registerDocumentSymbolProvider('grot', new GrotDocumentSymbolProvider()),
+        vscode.languages.registerDocumentFormattingEditProvider('grot', new GrotFormattingProvider())
+    );
+
+    // Register diagnostics
+    const diagnosticsProvider = new GrotDiagnosticsProvider();
+    context.subscriptions.push(diagnosticsProvider);
+
+    // Update diagnostics on document changes
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeTextDocument(e => {
+            if (e.document.languageId === 'grot') {
+                diagnosticsProvider.updateDiagnostics(e.document);
+            }
+        }),
+        vscode.workspace.onDidOpenTextDocument(doc => {
+            if (doc.languageId === 'grot') {
+                diagnosticsProvider.updateDiagnostics(doc);
+                treeDataProvider.refresh();
+                vscode.commands.executeCommand('setContext', 'grotFileOpen', true);
+            }
+        }),
+        vscode.window.onDidChangeActiveTextEditor(editor => {
+            if (editor && editor.document.languageId === 'grot') {
+                treeDataProvider.refresh();
+                vscode.commands.executeCommand('setContext', 'grotFileOpen', true);
+            } else {
+                vscode.commands.executeCommand('setContext', 'grotFileOpen', false);
+            }
+        })
+    );
+
+    // Register commands
+    context.subscriptions.push(
+        vscode.commands.registerCommand('grot.refreshTreeView', () => treeDataProvider.refresh()),
+        vscode.commands.registerCommand('grot.goToLine', (line: number) => {
+            const editor = vscode.window.activeTextEditor;
+            if (editor) {
+                const position = new vscode.Position(line, 0);
+                editor.selection = new vscode.Selection(position, position);
+                editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
+            }
+        }),
+        vscode.commands.registerCommand('grot.showStatistics', showStatistics),
+        vscode.commands.registerCommand('grot.goToMPRS', goToMPRS),
+        vscode.commands.registerCommand('grot.toggleRotation', toggleRotation),
+        vscode.commands.registerCommand('grot.addRotation', addRotation),
+        vscode.commands.registerCommand('grot.exportToCSV', exportToCSV),
+        vscode.commands.registerCommand('grot.validateFile', () => {
+            const editor = vscode.window.activeTextEditor;
+            if (editor && editor.document.languageId === 'grot') {
+                diagnosticsProvider.updateDiagnostics(editor.document);
+                vscode.window.showInformationMessage('Validation complete. Check the Problems panel for issues.');
+            }
+        }),
+        vscode.commands.registerCommand('grot.formatFile', () => {
+            vscode.commands.executeCommand('editor.action.formatDocument');
+        })
+    );
+
+    // Initial refresh if a grot file is already open
+    if (vscode.window.activeTextEditor?.document.languageId === 'grot') {
+        treeDataProvider.refresh();
+        diagnosticsProvider.updateDiagnostics(vscode.window.activeTextEditor.document);
+        vscode.commands.executeCommand('setContext', 'grotFileOpen', true);
+    }
+}
+
+export function deactivate(): void {
+    console.log('GROT Editor extension is now deactivated');
+}

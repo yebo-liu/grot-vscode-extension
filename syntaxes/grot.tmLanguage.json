@@ -1,0 +1,209 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "GPlates Rotation File",
+  "scopeName": "source.grot",
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#mprs-header" },
+    { "include": "#header-attribute" },
+    { "include": "#rotation-line" },
+    { "include": "#disabled-rotation" }
+  ],
+  "repository": {
+    "comment": {
+      "patterns": [
+        {
+          "name": "comment.line.number-sign.grot",
+          "match": "^#(?!\\s*\\d).*$"
+        },
+        {
+          "name": "comment.line.number-sign.grot",
+          "match": "#(?=\\s*@).*$"
+        }
+      ]
+    },
+    "mprs-header": {
+      "patterns": [
+        {
+          "name": "meta.mprs-header.grot",
+          "begin": "^(>)\\s*",
+          "end": "$",
+          "beginCaptures": {
+            "1": { "name": "keyword.control.mprs.grot" }
+          },
+          "patterns": [
+            { "include": "#attribute" }
+          ]
+        }
+      ]
+    },
+    "header-attribute": {
+      "patterns": [
+        {
+          "name": "meta.header-attribute.grot",
+          "match": "^(@[A-Z][A-Za-z0-9_:]+)(\"\"\"[^\"]*\"\"\"|\"[^\"]*\")",
+          "captures": {
+            "1": { "name": "entity.name.tag.attribute.grot" },
+            "2": { "name": "string.quoted.double.grot" }
+          }
+        },
+        {
+          "name": "meta.header-attribute.multiline.grot",
+          "begin": "^(@[A-Z][A-Za-z0-9_:]+)(\"\"\")",
+          "end": "\"\"\"",
+          "beginCaptures": {
+            "1": { "name": "entity.name.tag.attribute.grot" },
+            "2": { "name": "string.quoted.triple.begin.grot" }
+          },
+          "endCaptures": {
+            "0": { "name": "string.quoted.triple.end.grot" }
+          },
+          "contentName": "string.quoted.triple.grot"
+        }
+      ]
+    },
+    "rotation-line": {
+      "patterns": [
+        {
+          "name": "meta.rotation-line.grot",
+          "match": "^\\s*(\\d{1,4})\\s+(-?\\d+\\.?\\d*)\\s+(-?\\d+\\.?\\d*)\\s+(-?\\d+\\.?\\d*)\\s+(-?\\d+\\.?\\d*)\\s+(\\d{1,4})(.*)$",
+          "captures": {
+            "1": { "name": "constant.numeric.plate-id.moving.grot" },
+            "2": { "name": "constant.numeric.age.grot" },
+            "3": { "name": "constant.numeric.latitude.grot" },
+            "4": { "name": "constant.numeric.longitude.grot" },
+            "5": { "name": "constant.numeric.angle.grot" },
+            "6": { "name": "constant.numeric.plate-id.fixed.grot" },
+            "7": { 
+              "patterns": [
+                { "include": "#inline-attribute" },
+                { "include": "#legacy-comment" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "disabled-rotation": {
+      "patterns": [
+        {
+          "name": "meta.rotation-line.disabled.grot",
+          "match": "^\\s*(#)\\s*(\\d{1,4})\\s+(-?\\d+\\.?\\d*)\\s+(-?\\d+\\.?\\d*)\\s+(-?\\d+\\.?\\d*)\\s+(-?\\d+\\.?\\d*)\\s+(\\d{1,4})(.*)$",
+          "captures": {
+            "1": { "name": "comment.line.disabled.grot" },
+            "2": { "name": "comment.line.disabled.plate-id.grot" },
+            "3": { "name": "comment.line.disabled.grot" },
+            "4": { "name": "comment.line.disabled.grot" },
+            "5": { "name": "comment.line.disabled.grot" },
+            "6": { "name": "comment.line.disabled.grot" },
+            "7": { "name": "comment.line.disabled.grot" },
+            "8": { "name": "comment.line.disabled.grot" }
+          }
+        }
+      ]
+    },
+    "attribute": {
+      "patterns": [
+        {
+          "name": "meta.attribute.grot",
+          "match": "(@[A-Z][A-Za-z0-9_:]*)(\"\"\"[^\"]*\"\"\"|\"[^\"]*\")",
+          "captures": {
+            "1": { "name": "entity.name.tag.attribute.grot" },
+            "2": { "name": "string.quoted.double.grot" }
+          }
+        }
+      ]
+    },
+    "inline-attribute": {
+      "patterns": [
+        {
+          "name": "meta.inline-attribute.comment.grot",
+          "match": "(@C)(\"[^\"]*\")",
+          "captures": {
+            "1": { "name": "entity.name.tag.comment.grot" },
+            "2": { "name": "string.quoted.double.comment.grot" }
+          }
+        },
+        {
+          "name": "meta.inline-attribute.reference.grot",
+          "match": "(@REF)(\"[^\"]*\")",
+          "captures": {
+            "1": { "name": "entity.name.tag.reference.grot" },
+            "2": { "name": "string.quoted.double.reference.grot" }
+          }
+        },
+        {
+          "name": "meta.inline-attribute.doi.grot",
+          "match": "(@DOI)(\"[^\"]*\")",
+          "captures": {
+            "1": { "name": "entity.name.tag.doi.grot" },
+            "2": { "name": "markup.underline.link.grot" }
+          }
+        },
+        {
+          "name": "meta.inline-attribute.author.grot",
+          "match": "(@AU)(\"[^\"]*\")",
+          "captures": {
+            "1": { "name": "entity.name.tag.author.grot" },
+            "2": { "name": "string.quoted.double.author.grot" }
+          }
+        },
+        {
+          "name": "meta.inline-attribute.chronid.grot",
+          "match": "(@CHRONID)(\"[^\"]*\")",
+          "captures": {
+            "1": { "name": "entity.name.tag.chronid.grot" },
+            "2": { "name": "constant.other.chronid.grot" }
+          }
+        },
+        {
+          "name": "meta.inline-attribute.gts.grot",
+          "match": "(@GTS)(\"[^\"]*\")",
+          "captures": {
+            "1": { "name": "entity.name.tag.gts.grot" },
+            "2": { "name": "string.quoted.double.gts.grot" }
+          }
+        },
+        {
+          "name": "meta.inline-attribute.pp.grot",
+          "match": "(@PP)(\"[^\"]*\")",
+          "captures": {
+            "1": { "name": "entity.name.tag.platepair.grot" },
+            "2": { "name": "constant.other.platepair.grot" }
+          }
+        },
+        {
+          "name": "meta.inline-attribute.timestamp.grot",
+          "match": "(@T)(\"[^\"]*\")",
+          "captures": {
+            "1": { "name": "entity.name.tag.timestamp.grot" },
+            "2": { "name": "constant.other.timestamp.grot" }
+          }
+        },
+        {
+          "name": "meta.inline-attribute.absage.grot",
+          "match": "@ABSAGE",
+          "captures": {
+            "0": { "name": "keyword.other.absage.grot" }
+          }
+        },
+        {
+          "name": "meta.inline-attribute.other.grot",
+          "match": "(@[A-Z][A-Za-z0-9_:]*)(\"[^\"]*\")?",
+          "captures": {
+            "1": { "name": "entity.name.tag.other.grot" },
+            "2": { "name": "string.quoted.double.other.grot" }
+          }
+        }
+      ]
+    },
+    "legacy-comment": {
+      "patterns": [
+        {
+          "name": "comment.line.legacy.grot",
+          "match": "!.*$"
+        }
+      ]
+    }
+  }
+}

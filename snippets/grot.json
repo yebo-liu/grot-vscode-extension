@@ -1,0 +1,110 @@
+{
+  "GROT File Header": {
+    "prefix": "grotheader",
+    "body": [
+      "@GPLATESROTATIONFILE:version\"1.0\"",
+      "@GPML:namespace\"http://www.earthbyte.org/Resources/GPGIM/public/\"",
+      "@DC:namespace\"http://purl.org/dc/elements/1.1/\"",
+      "@DC:title\"${1:GPlates rotation file}\"",
+      "@DC:creator:name\"${2:Your Name}\"",
+      "@DC:creator:email\"${3:your.email@example.com}\"",
+      "@DC:creator:url\"${4:}\"",
+      "@DC:creator:affiliation\"${5:Your Institution}\"",
+      "@DC:rights:license\"${6:CC BY-NC-SA 4.0}\"",
+      "@DC:rights:url\"${7:https://creativecommons.org/licenses/by-nc-sa/4.0/}\"",
+      "@DC:date:created\"$CURRENT_YEAR-$CURRENT_MONTH-$CURRENT_DATE\"",
+      "@DC:date:modified\"$CURRENT_YEAR-$CURRENT_MONTH-$CURRENT_DATE\"",
+      "@DC:coverage:temporal\"${8:0-600} Ma\"",
+      "@DC:description\"\"\"",
+      "${9:Description of the rotation model}",
+      "\"\"\"",
+      "#==============================================================================",
+      "$0"
+    ],
+    "description": "Insert a complete GROT file header with Dublin Core metadata"
+  },
+  "MPRS Header": {
+    "prefix": "mprs",
+    "body": [
+      "> @MPRS:pid\"${1:001}\" @MPRS:code\"${2:CODE}\" @MPRS:name\"${3:Plate Name}\"",
+      "> @PP\"${2:CODE}-${4:000}\" @C\"${5:comment}\"",
+      "${1:001}  0.0000    90.0000   0.0000    0.0000    ${4:000}   @C\"${3:Plate Name} fixed to ${4:000}\"",
+      "$0"
+    ],
+    "description": "Insert a new Moving Plate Rotation Sequence header"
+  },
+  "Rotation Line": {
+    "prefix": "rot",
+    "body": [
+      "${1:001}  ${2:0.0000}    ${3:0.0000}   ${4:0.0000}    ${5:0.0000}    ${6:000}   @C\"${7:comment}\"$0"
+    ],
+    "description": "Insert a new rotation line"
+  },
+  "Rotation with Reference": {
+    "prefix": "rotref",
+    "body": [
+      "${1:001}  ${2:0.0000}    ${3:0.0000}   ${4:0.0000}    ${5:0.0000}    ${6:000}   @C\"${7:comment}\" @REF\"${8:Reference}\" @DOI\"${9:10.xxxx/xxxxx}\"$0"
+    ],
+    "description": "Insert a rotation line with bibliographic reference"
+  },
+  "Rotation with Chron ID": {
+    "prefix": "rotchron",
+    "body": [
+      "${1:001}  ${2:0.0000}    ${3:0.0000}   ${4:0.0000}    ${5:0.0000}    ${6:000}   @CHRONID\"${7:C}${8:number}\" @GTS\"${9:CK95}\"$0"
+    ],
+    "description": "Insert a rotation line with magnetic chron ID"
+  },
+  "Contributor": {
+    "prefix": "contributor",
+    "body": [
+      "@DC:contributor\"${1:ID} | ${2:Full Name} | ${3:email@example.com} | ${4:URL} | ${5:Institution}\"$0"
+    ],
+    "description": "Insert a contributor definition"
+  },
+  "Geological Time Scale": {
+    "prefix": "gts",
+    "body": [
+      "@GEOTIMESCALE\"\"\" ${1:ID} |",
+      "doi:${2:10.xxxx/xxxxx} |",
+      "${3:CiteKey} |",
+      "${4:Full bibliographic reference}\"\"\"$0"
+    ],
+    "description": "Insert a geological time scale definition"
+  },
+  "Comment Block": {
+    "prefix": "cblock",
+    "body": [
+      "#==============================================================================",
+      "# ${1:Section Title}",
+      "#==============================================================================",
+      "$0"
+    ],
+    "description": "Insert a comment block separator"
+  },
+  "Present Day Identity Rotation": {
+    "prefix": "rot0",
+    "body": [
+      "${1:001}  0.0000    90.0000   0.0000    0.0000    ${2:000}   @C\"${3:Present day}\"$0"
+    ],
+    "description": "Insert a present-day identity rotation (0 Ma)"
+  },
+  "Hellinger Uncertainty Parameters": {
+    "prefix": "hellinger",
+    "body": [
+      "@HELL:r\"${1:misfit}\"",
+      "@HELL:Ns\"${2:N},${3:s}\"",
+      "@HELL:dF\"${4:dof}\"",
+      "@HELL:kappahat\"${5:kappa}\"",
+      "@HELL:cov\"(${6:x1},${7:x2},${8:x3})(${9:y2},${10:y3})(${11:z3})\"$0"
+    ],
+    "description": "Insert Hellinger uncertainty parameters"
+  },
+  "Bibliography File Reference": {
+    "prefix": "bibfile",
+    "body": [
+      "@BIBINFO:bibfile\"file://${1:rotationfile}.bib\"",
+      "@BIBINFO:doibase\"http://dx.doi.org/\"$0"
+    ],
+    "description": "Insert bibliography file reference"
+  }
+}
