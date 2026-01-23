@@ -66,14 +66,14 @@
       "patterns": [
         {
           "name": "meta.rotation-line.grot",
-          "match": "^\\s*(\\d{1,4})\\s+(-?\\d+\\.?\\d*)\\s+(-?\\d+\\.?\\d*)\\s+(-?\\d+\\.?\\d*)\\s+(-?\\d+\\.?\\d*)\\s+(\\d{1,4})(.*)$",
+          "match": "^\\s*(\\d{1,6})\\s+(-?\\d+\\.?\\d*)\\s+(-?\\d+\\.?\\d*)\\s+(-?\\d+\\.?\\d*)\\s+(-?\\d+\\.?\\d*)\\s+(\\d{1,6})(.*)$",
           "captures": {
-            "1": { "name": "constant.numeric.plate-id.moving.grot" },
+            "1": { "name": "variable.other.plate-id.moving.grot" },
             "2": { "name": "constant.numeric.age.grot" },
-            "3": { "name": "constant.numeric.latitude.grot" },
-            "4": { "name": "constant.numeric.longitude.grot" },
-            "5": { "name": "constant.numeric.angle.grot" },
-            "6": { "name": "constant.numeric.plate-id.fixed.grot" },
+            "3": { "name": "support.constant.latitude.grot" },
+            "4": { "name": "support.constant.longitude.grot" },
+            "5": { "name": "keyword.operator.angle.grot" },
+            "6": { "name": "variable.parameter.plate-id.fixed.grot" },
             "7": { 
               "patterns": [
                 { "include": "#inline-attribute" },
@@ -88,7 +88,7 @@
       "patterns": [
         {
           "name": "meta.rotation-line.disabled.grot",
-          "match": "^\\s*(#)\\s*(\\d{1,4})\\s+(-?\\d+\\.?\\d*)\\s+(-?\\d+\\.?\\d*)\\s+(-?\\d+\\.?\\d*)\\s+(-?\\d+\\.?\\d*)\\s+(\\d{1,4})(.*)$",
+          "match": "^\\s*(#)\\s*(\\d{1,6})\\s+(-?\\d+\\.?\\d*)\\s+(-?\\d+\\.?\\d*)\\s+(-?\\d+\\.?\\d*)\\s+(-?\\d+\\.?\\d*)\\s+(\\d{1,6})(.*)$",
           "captures": {
             "1": { "name": "comment.line.disabled.grot" },
             "2": { "name": "comment.line.disabled.plate-id.grot" },
