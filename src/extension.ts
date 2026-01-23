@@ -185,7 +185,9 @@ class GrotTreeItem extends vscode.TreeItem {
         public readonly contextValue?: string
     ) {
         super(label, collapsibleState);
+        // Store line number in id for reliable retrieval in command handlers
         if (lineNumber !== undefined) {
+            this.id = `${contextValue}-${lineNumber}`;
             this.command = {
                 command: 'grot.goToLine',
                 title: 'Go to Line',
@@ -200,6 +202,7 @@ class GrotTreeDataProvider implements vscode.TreeDataProvider<GrotTreeItem> {
     readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
     private document: GrotDocument | null = null;
+    private mprsItems: Map<number, GrotTreeItem> = new Map(); // Map of MPRS line -> TreeItem
 
     refresh(): void {
         const editor = vscode.window.activeTextEditor;
@@ -208,11 +211,44 @@ class GrotTreeDataProvider implements vscode.TreeDataProvider<GrotTreeItem> {
         } else {
             this.document = null;
         }
+        this.mprsItems.clear();
         this._onDidChangeTreeData.fire();
     }
 
     getTreeItem(element: GrotTreeItem): vscode.TreeItem {
         return element;
+    }
+
+    // Find which MPRS contains the given line number
+    findMPRSForLine(lineNumber: number): GrotTreeItem | undefined {
+        if (!this.document) return undefined;
+        
+        // Find the MPRS that contains this line
+        let containingMprs: MPRS | undefined;
+        for (let i = 0; i < this.document.mprsSequences.length; i++) {
+            const mprs = this.document.mprsSequences[i];
+            const nextMprs = this.document.mprsSequences[i + 1];
+            const mprsEndLine = nextMprs ? nextMprs.line - 1 : Infinity;
+            
+            if (lineNumber >= mprs.line && lineNumber <= mprsEndLine) {
+                containingMprs = mprs;
+                break;
+            }
+        }
+        
+        if (containingMprs) {
+            return this.mprsItems.get(containingMprs.line);
+        }
+        return undefined;
+    }
+
+    getParent(element: GrotTreeItem): vscode.ProviderResult<GrotTreeItem> {
+        // Return undefined for root items, or the parent MPRS for rotation items
+        if (element.contextValue === 'rotation' && element.lineNumber !== undefined) {
+            // Find the MPRS that contains this rotation
+            return this.findMPRSForLine(element.lineNumber);
+        }
+        return undefined;
     }
 
     getChildren(element?: GrotTreeItem): Thenable<GrotTreeItem[]> {
@@ -248,6 +284,8 @@ class GrotTreeDataProvider implements vscode.TreeDataProvider<GrotTreeItem> {
                 mprsItem.tooltip = `Plate ID: ${mprs.plateId}\nCode: ${mprs.code}\nName: ${mprs.name}\nPlate Pair: ${mprs.platePair}\nRotations: ${mprs.rotations.length}`;
                 mprsItem.iconPath = new vscode.ThemeIcon('globe');
                 items.push(mprsItem);
+                // Store in map for later lookup
+                this.mprsItems.set(mprs.line, mprsItem);
             }
 
             return Promise.resolve(items);
@@ -1989,9 +2027,13 @@ class AddMPRSPanel {
 export function activate(context: vscode.ExtensionContext): void {
     console.log('GROT Editor extension is now active');
 
-    // Register Tree View
+    // Register Tree View with createTreeView for reveal() support
     const treeDataProvider = new GrotTreeDataProvider();
-    vscode.window.registerTreeDataProvider('grotExplorer', treeDataProvider);
+    const treeView = vscode.window.createTreeView('grotExplorer', {
+        treeDataProvider: treeDataProvider,
+        showCollapseAll: true
+    });
+    context.subscriptions.push(treeView);
 
     // Register providers
     context.subscriptions.push(
@@ -2014,6 +2056,19 @@ export function activate(context: vscode.ExtensionContext): void {
                 vscode.commands.executeCommand('setContext', 'grotFileOpen', true);
             } else {
                 vscode.commands.executeCommand('setContext', 'grotFileOpen', false);
+            }
+        })
+    );
+
+    // Sync tree selection with cursor position
+    context.subscriptions.push(
+        vscode.window.onDidChangeTextEditorSelection(e => {
+            if (e.textEditor.document.languageId === 'grot' && e.selections.length > 0) {
+                const cursorLine = e.selections[0].active.line;
+                const mprsItem = treeDataProvider.findMPRSForLine(cursorLine);
+                if (mprsItem) {
+                    treeView.reveal(mprsItem, { select: true, focus: false, expand: false });
+                }
             }
         })
     );
@@ -2045,8 +2100,17 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.commands.registerCommand('grot.exportToCSV', exportToCSV),
         vscode.commands.registerCommand('grot.editMPRS', (mprsLine?: number) => editMPRSMetadata(context, mprsLine)),
         vscode.commands.registerCommand('grot.editMPRSFromTree', (item: GrotTreeItem) => {
-            if (item.lineNumber !== undefined) {
-                editMPRSMetadata(context, item.lineNumber);
+            // Extract line number from item - try lineNumber first, then parse from id
+            let lineNumber = item.lineNumber;
+            if (lineNumber === undefined && item.id) {
+                // id format is "contextValue-lineNumber"
+                const match = item.id.match(/-(\d+)$/);
+                if (match) {
+                    lineNumber = parseInt(match[1], 10);
+                }
+            }
+            if (lineNumber !== undefined) {
+                editMPRSMetadata(context, lineNumber);
             }
         }),
         vscode.commands.registerCommand('grot.formatFile', () => {
