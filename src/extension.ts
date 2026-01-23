@@ -1092,7 +1092,18 @@ class MPRSEditorPanel {
 
         // Build new header lines
         const newLine1 = `> @MPRS:pid"${data.plateId}" @MPRS:code"${data.code}" @MPRS:name"${data.name}"`;
-        const newLine2 = `> @PP"${data.platePair}"${data.comment ? ` @C"${data.comment}"` : ''}`;
+        
+        // Format comment: use triple quotes for multi-line, single quotes for single-line
+        let commentStr = '';
+        if (data.comment) {
+            const trimmedComment = data.comment.trim();
+            if (trimmedComment.includes('\n')) {
+                commentStr = ` @C"""${trimmedComment}"""`;
+            } else {
+                commentStr = ` @C"${trimmedComment}"`;
+            }
+        }
+        const newLine2 = `> @PP"${data.platePair}"${commentStr}`;
 
         const range = new vscode.Range(startLine, 0, endLine, this._document.lineAt(endLine).text.length);
         
@@ -1469,9 +1480,20 @@ class AddMPRSPanel {
         const plateIdPadded = data.plateId.padStart(3, '0');
         const fixedPlateIdPadded = data.fixedPlateId.padStart(3, '0');
         
+        // Format comment: use triple quotes for multi-line, single quotes for single-line
+        let commentStr = '';
+        if (data.comment) {
+            const trimmedComment = data.comment.trim();
+            if (trimmedComment.includes('\n')) {
+                commentStr = ` @C"""${trimmedComment}"""`;
+            } else {
+                commentStr = ` @C"${trimmedComment}"`;
+            }
+        }
+        
         const newMPRSContent = [
             `> @MPRS:pid"${data.plateId}" @MPRS:code"${data.code}" @MPRS:name"${data.name}"`,
-            `> @PP"${data.platePair}"${data.comment ? ` @C"${data.comment}"` : ''}`,
+            `> @PP"${data.platePair}"${commentStr}`,
             `${plateIdPadded}  0.0000    90.0000   0.0000    0.0000    ${fixedPlateIdPadded}   @C"Present day"`
         ].join('\n');
 
