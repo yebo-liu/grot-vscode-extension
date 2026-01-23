@@ -1071,27 +1071,52 @@ class MPRSEditorPanel {
         }
     }
 
-    private async _saveMetadata(data: { plateId: string; code: string; name: string; platePair: string; comment: string }): Promise<void> {
+    private async _saveMetadata(data: { originalPlateId: string; newPlateId: string; code: string; name: string; platePair: string; comment: string }): Promise<void> {
         const editor = vscode.window.visibleTextEditors.find(e => e.document === this._document);
         if (!editor) {
             vscode.window.showErrorMessage('Could not find the editor for this document');
             return;
         }
 
-        // Find the MPRS header lines (could be 1 or 2 lines starting with >)
+        const originalId = parseInt(data.originalPlateId);
+        const newId = parseInt(data.newPlateId);
+        const plateIdChanged = originalId !== newId;
+
+        // Check if new plate ID is already taken (if changed)
+        if (plateIdChanged) {
+            const grotDoc = GrotParser.parse(this._document);
+            const existingMprs = grotDoc.mprsSequences.find(m => m.plateId === newId);
+            if (existingMprs) {
+                vscode.window.showErrorMessage(`Plate ID ${newId} is already taken by MPRS: ${existingMprs.code} - ${existingMprs.name}`);
+                return;
+            }
+        }
+
+        // Find the MPRS header lines (could be 1 or 2+ lines starting with > or containing multi-line comment)
         const startLine = this._mprs.line;
         let endLine = startLine;
         
-        // Check if there's a second header line
-        if (startLine + 1 < this._document.lineCount) {
-            const nextLine = this._document.lineAt(startLine + 1).text.trim();
-            if (nextLine.startsWith('>') && !nextLine.match(/@MPRS:pid/)) {
-                endLine = startLine + 1;
+        // Check for additional header lines and multi-line comments
+        for (let i = startLine + 1; i < this._document.lineCount; i++) {
+            const lineText = this._document.lineAt(i).text.trim();
+            // Stop if we hit a rotation line or another MPRS
+            if (lineText.match(/^\d/) || (lineText.startsWith('>') && lineText.match(/@MPRS:pid/))) {
+                break;
+            }
+            // Continue if it's a header continuation line or part of multi-line comment
+            if (lineText.startsWith('>') || lineText.includes('"""') || (!lineText.startsWith('#') && !lineText.match(/^\d/))) {
+                endLine = i;
+                // If we find closing triple quotes, stop
+                if (lineText.endsWith('"""') && i > startLine) {
+                    break;
+                }
+            } else {
+                break;
             }
         }
 
         // Build new header lines
-        const newLine1 = `> @MPRS:pid"${data.plateId}" @MPRS:code"${data.code}" @MPRS:name"${data.name}"`;
+        const newLine1 = `> @MPRS:pid"${data.newPlateId}" @MPRS:code"${data.code}" @MPRS:name"${data.name}"`;
         
         // Format comment: use triple quotes for multi-line, single quotes for single-line
         let commentStr = '';
@@ -1111,11 +1136,44 @@ class MPRSEditorPanel {
             editBuilder.replace(range, `${newLine1}\n${newLine2}`);
         });
 
-        vscode.window.showInformationMessage(`Updated MPRS ${data.code} (${data.plateId})`);
+        // If plate ID changed, update all rotation lines in this MPRS
+        if (plateIdChanged) {
+            const newPlateIdPadded = data.newPlateId.padStart(3, '0');
+            const oldPlateIdPattern = new RegExp(`^(\\s*)${originalId}(\\s+)`, 'gm');
+            
+            // Re-read document after first edit
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
+            // Find and update rotation lines
+            const updatedDoc = editor.document;
+            const edits: { line: number; oldText: string; newText: string }[] = [];
+            
+            for (const rotation of this._mprs.rotations) {
+                const lineNum = rotation.line + (endLine - startLine - 1); // Adjust for header change
+                if (lineNum < updatedDoc.lineCount) {
+                    const lineText = updatedDoc.lineAt(rotation.line).text;
+                    const newLineText = lineText.replace(/^(\s*)\d+/, `$1${newPlateIdPadded}`);
+                    if (newLineText !== lineText) {
+                        edits.push({ line: rotation.line, oldText: lineText, newText: newLineText });
+                    }
+                }
+            }
+            
+            if (edits.length > 0) {
+                await editor.edit(editBuilder => {
+                    for (const edit of edits) {
+                        const lineRange = updatedDoc.lineAt(edit.line).range;
+                        editBuilder.replace(lineRange, edit.newText);
+                    }
+                });
+            }
+        }
+
+        vscode.window.showInformationMessage(`Updated MPRS ${data.code} (${data.newPlateId})${plateIdChanged ? ` - Plate ID changed from ${originalId} to ${newId}` : ''}`);
         
         // Re-parse and update panel
         const grotDoc = GrotParser.parse(this._document);
-        const updatedMprs = grotDoc.mprsSequences.find(m => m.plateId === parseInt(data.plateId));
+        const updatedMprs = grotDoc.mprsSequences.find(m => m.plateId === newId);
         if (updatedMprs) {
             this._mprs = updatedMprs;
             this._update();
@@ -1127,9 +1185,64 @@ class MPRSEditorPanel {
         this._panel.webview.html = this._getHtmlForWebview();
     }
 
+    private _getMultiLineComment(): string {
+        // Extract comment from MPRS header, handling multi-line triple-quoted comments
+        let comment = this._mprs.metadata.get('C') || '';
+        
+        // If we have a simple comment, return it
+        if (comment) {
+            return comment;
+        }
+        
+        // Otherwise, try to extract multi-line comment from the document
+        const startLine = this._mprs.line;
+        let fullComment = '';
+        let inMultiLineComment = false;
+        
+        for (let i = startLine; i < Math.min(startLine + 20, this._document.lineCount); i++) {
+            const lineText = this._document.lineAt(i).text;
+            
+            // Check for start of triple-quoted comment
+            const tripleQuoteStart = lineText.match(/@C"""(.*)$/);
+            if (tripleQuoteStart && !inMultiLineComment) {
+                inMultiLineComment = true;
+                const content = tripleQuoteStart[1];
+                // Check if it ends on the same line
+                if (content.endsWith('"""')) {
+                    return content.slice(0, -3);
+                }
+                fullComment = content;
+                continue;
+            }
+            
+            if (inMultiLineComment) {
+                // Check for end of triple-quoted comment
+                if (lineText.includes('"""')) {
+                    const endIdx = lineText.indexOf('"""');
+                    fullComment += '\n' + lineText.substring(0, endIdx);
+                    return fullComment;
+                }
+                fullComment += '\n' + lineText;
+            }
+            
+            // Stop if we hit a rotation line
+            if (lineText.trim().match(/^\d/)) {
+                break;
+            }
+        }
+        
+        return comment;
+    }
+
     private _getHtmlForWebview(): string {
         const mprs = this._mprs;
-        const comment = mprs.metadata.get('C') || '';
+        const comment = this._getMultiLineComment();
+        
+        // Get all existing plate IDs for validation
+        const grotDoc = GrotParser.parse(this._document);
+        const existingPlateIds = grotDoc.mprsSequences
+            .filter(m => m.plateId !== mprs.plateId)
+            .map(m => m.plateId);
         
         return `<!DOCTYPE html>
 <html lang="en">
@@ -1148,6 +1261,8 @@ class MPRSEditorPanel {
             --button-fg: var(--vscode-button-foreground);
             --button-hover: var(--vscode-button-hoverBackground);
             --accent: var(--vscode-textLink-foreground);
+            --error: #f44336;
+            --warning: #ff9800;
         }
         body {
             font-family: var(--vscode-font-family);
@@ -1189,13 +1304,25 @@ class MPRSEditorPanel {
             outline: none;
             border-color: var(--accent);
         }
+        input.error {
+            border-color: var(--error);
+        }
+        input:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+        }
         textarea {
             resize: vertical;
-            min-height: 60px;
+            min-height: 80px;
         }
         .row {
             display: grid;
             grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+        .row-3 {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
             gap: 16px;
         }
         .actions {
@@ -1214,11 +1341,15 @@ class MPRSEditorPanel {
             font-weight: 500;
             transition: background 0.2s;
         }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
         .btn-primary {
             background: var(--button-bg);
             color: var(--button-fg);
         }
-        .btn-primary:hover {
+        .btn-primary:hover:not(:disabled) {
             background: var(--button-hover);
         }
         .btn-secondary {
@@ -1253,6 +1384,32 @@ class MPRSEditorPanel {
             color: var(--vscode-descriptionForeground);
             margin-top: 4px;
         }
+        .error-msg {
+            font-size: 0.85em;
+            color: var(--error);
+            margin-top: 4px;
+            display: none;
+        }
+        .error-msg.visible {
+            display: block;
+        }
+        .warning-box {
+            background: rgba(255, 152, 0, 0.1);
+            border: 1px solid var(--warning);
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 16px;
+            display: none;
+        }
+        .warning-box.visible {
+            display: block;
+        }
+        .section-title {
+            font-size: 1em;
+            font-weight: 600;
+            margin: 20px 0 12px 0;
+            color: var(--accent);
+        }
     </style>
 </head>
 <body>
@@ -1280,17 +1437,29 @@ class MPRSEditorPanel {
         </div>
     </div>
 
+    <div class="warning-box" id="plateIdWarning">
+        ⚠️ <strong>Warning:</strong> Changing the plate ID will also update all <span id="rotationCount">${mprs.rotations.length}</span> rotation lines in this MPRS.
+    </div>
+
     <form id="mprsForm">
-        <div class="row">
+        <div class="section-title">Plate Identification</div>
+        
+        <div class="row-3">
             <div class="form-group">
-                <label for="plateId">Plate ID</label>
-                <input type="number" id="plateId" value="${mprs.plateId}" required>
-                <div class="hint">Unique numeric identifier for this plate</div>
+                <label for="originalPlateId">Original Plate ID</label>
+                <input type="number" id="originalPlateId" value="${mprs.plateId}" disabled>
+                <div class="hint">Current ID (read-only)</div>
+            </div>
+            <div class="form-group">
+                <label for="newPlateId">New Plate ID</label>
+                <input type="number" id="newPlateId" value="${mprs.plateId}" required min="1">
+                <div class="hint">Change to reassign ID</div>
+                <div class="error-msg" id="plateIdError">This plate ID is already taken!</div>
             </div>
             <div class="form-group">
                 <label for="code">Plate Code</label>
                 <input type="text" id="code" value="${mprs.code}" required maxlength="10">
-                <div class="hint">Short code (e.g., NAM, EUR, AFR)</div>
+                <div class="hint">Short code (3-4 chars)</div>
             </div>
         </div>
 
@@ -1308,25 +1477,65 @@ class MPRSEditorPanel {
 
         <div class="form-group">
             <label for="comment">Comment (@C)</label>
-            <textarea id="comment" rows="2">${comment}</textarea>
-            <div class="hint">Optional description or notes</div>
+            <textarea id="comment" rows="4">${this._escapeHtml(comment)}</textarea>
+            <div class="hint">Optional description or notes (multi-line supported)</div>
         </div>
 
         <div class="actions">
-            <button type="submit" class="btn-primary">💾 Save Changes</button>
+            <button type="submit" class="btn-primary" id="saveBtn">💾 Save Changes</button>
             <button type="button" class="btn-secondary" onclick="goToLine(${mprs.line})">📍 Go to Line</button>
         </div>
     </form>
 
     <script>
         const vscode = acquireVsCodeApi();
+        const existingPlateIds = [${existingPlateIds.join(',')}];
+        const originalPlateId = ${mprs.plateId};
+        
+        const newPlateIdInput = document.getElementById('newPlateId');
+        const plateIdError = document.getElementById('plateIdError');
+        const plateIdWarning = document.getElementById('plateIdWarning');
+        const saveBtn = document.getElementById('saveBtn');
+        
+        function validatePlateId() {
+            const newId = parseInt(newPlateIdInput.value);
+            const isDuplicate = existingPlateIds.includes(newId);
+            const isChanged = newId !== originalPlateId;
+            
+            // Show/hide error
+            if (isDuplicate) {
+                newPlateIdInput.classList.add('error');
+                plateIdError.classList.add('visible');
+                saveBtn.disabled = true;
+            } else {
+                newPlateIdInput.classList.remove('error');
+                plateIdError.classList.remove('visible');
+                saveBtn.disabled = false;
+            }
+            
+            // Show/hide warning about rotation updates
+            if (isChanged && !isDuplicate) {
+                plateIdWarning.classList.add('visible');
+            } else {
+                plateIdWarning.classList.remove('visible');
+            }
+        }
+        
+        newPlateIdInput.addEventListener('input', validatePlateId);
         
         document.getElementById('mprsForm').addEventListener('submit', (e) => {
             e.preventDefault();
+            
+            const newId = parseInt(newPlateIdInput.value);
+            if (existingPlateIds.includes(newId)) {
+                return; // Don't submit if duplicate
+            }
+            
             vscode.postMessage({
                 command: 'save',
                 data: {
-                    plateId: document.getElementById('plateId').value,
+                    originalPlateId: document.getElementById('originalPlateId').value,
+                    newPlateId: document.getElementById('newPlateId').value,
                     code: document.getElementById('code').value,
                     name: document.getElementById('name').value,
                     platePair: document.getElementById('platePair').value,
@@ -1341,9 +1550,20 @@ class MPRSEditorPanel {
                 line: line
             });
         }
+        
+        // Initial validation
+        validatePlateId();
     </script>
 </body>
 </html>`;
+    }
+
+    private _escapeHtml(text: string): string {
+        return text
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
     }
 
     public dispose(): void {
