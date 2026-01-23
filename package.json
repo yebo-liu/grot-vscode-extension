@@ -77,15 +77,11 @@
         "command": "grot.showStatistics",
         "title": "GROT: Show File Statistics"
       },
-      {
-        "command": "grot.toggleRotation",
-        "title": "GROT: Toggle Rotation (Enable/Disable)"
-      },
-      {
-        "command": "grot.sortByAge",
-        "title": "GROT: Sort Rotations by Age"
-      },
 {
+      "command": "grot.toggleRotation",
+      "title": "GROT: Toggle Rotation (Enable/Disable)"
+    },
+    {
       "command": "grot.exportToCSV",
       "title": "GROT: Export MPRS to CSV"
     },

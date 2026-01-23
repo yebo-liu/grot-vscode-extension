@@ -64,7 +64,7 @@ View comprehensive statistics including:
 | Command | Description |
 |---------|-------------|
 | `GROT: Add New Rotation` | Insert a new rotation line |
-| `GROT: Add New MPRS` | Create a new plate rotation sequence |
+| `GROT: Add New Moving Plate Rotation Sequence` | Create a new MPRS with a form panel |
 | `GROT: Toggle Rotation` | Enable/disable a rotation |
 | `GROT: Go to MPRS...` | Quick navigation picker |
 | `GROT: Go to Plate ID...` | Jump to MPRS by plate ID number |

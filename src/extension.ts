@@ -1387,6 +1387,454 @@ async function editMPRSMetadata(context: vscode.ExtensionContext, mprsLine?: num
 }
 
 // ============================================================================
+// Add New MPRS Panel
+// ============================================================================
+
+class AddMPRSPanel {
+    public static currentPanel: AddMPRSPanel | undefined;
+    private readonly _panel: vscode.WebviewPanel;
+    private readonly _extensionUri: vscode.Uri;
+    private _document: vscode.TextDocument;
+    private _disposables: vscode.Disposable[] = [];
+    private _treeDataProvider: GrotTreeDataProvider;
+
+    private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri, document: vscode.TextDocument, treeDataProvider: GrotTreeDataProvider) {
+        this._panel = panel;
+        this._extensionUri = extensionUri;
+        this._document = document;
+        this._treeDataProvider = treeDataProvider;
+
+        this._update();
+
+        this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
+
+        this._panel.webview.onDidReceiveMessage(
+            async message => {
+                switch (message.command) {
+                    case 'create':
+                        await this._createMPRS(message.data);
+                        break;
+                    case 'cancel':
+                        this._panel.dispose();
+                        break;
+                }
+            },
+            null,
+            this._disposables
+        );
+    }
+
+    public static createOrShow(extensionUri: vscode.Uri, document: vscode.TextDocument, treeDataProvider: GrotTreeDataProvider): void {
+        const column = vscode.ViewColumn.Beside;
+
+        if (AddMPRSPanel.currentPanel) {
+            AddMPRSPanel.currentPanel._document = document;
+            AddMPRSPanel.currentPanel._update();
+            AddMPRSPanel.currentPanel._panel.reveal(column);
+            return;
+        }
+
+        const panel = vscode.window.createWebviewPanel(
+            'addMPRS',
+            'Add New MPRS',
+            column,
+            {
+                enableScripts: true,
+                retainContextWhenHidden: true
+            }
+        );
+
+        AddMPRSPanel.currentPanel = new AddMPRSPanel(panel, extensionUri, document, treeDataProvider);
+    }
+
+    private async _createMPRS(data: { 
+        plateId: string; 
+        code: string; 
+        name: string; 
+        platePair: string; 
+        comment: string;
+        fixedPlateId: string;
+        insertPosition: string;
+    }): Promise<void> {
+        const editor = vscode.window.visibleTextEditors.find(e => e.document === this._document);
+        if (!editor) {
+            vscode.window.showErrorMessage('Could not find the editor for this document');
+            return;
+        }
+
+        // Parse the document to find existing MPRS sequences
+        const grotDoc = GrotParser.parse(this._document);
+        
+        // Build the new MPRS content
+        const plateIdPadded = data.plateId.padStart(3, '0');
+        const fixedPlateIdPadded = data.fixedPlateId.padStart(3, '0');
+        
+        const newMPRSContent = [
+            `> @MPRS:pid"${data.plateId}" @MPRS:code"${data.code}" @MPRS:name"${data.name}"`,
+            `> @PP"${data.platePair}"${data.comment ? ` @C"${data.comment}"` : ''}`,
+            `${plateIdPadded}  0.0000    90.0000   0.0000    0.0000    ${fixedPlateIdPadded}   @C"Present day"`
+        ].join('\n');
+
+        // Determine insert position
+        let insertLine: number;
+        const newPlateId = parseInt(data.plateId);
+        
+        if (data.insertPosition === 'sorted') {
+            // Find the correct position based on plate ID (sorted order)
+            insertLine = this._findSortedInsertPosition(grotDoc, newPlateId);
+        } else if (data.insertPosition === 'end') {
+            // Insert at end of file
+            insertLine = this._document.lineCount;
+        } else {
+            // Insert after specific MPRS (value is the plate ID to insert after)
+            const afterPlateId = parseInt(data.insertPosition);
+            const afterMprs = grotDoc.mprsSequences.find(m => m.plateId === afterPlateId);
+            if (afterMprs) {
+                // Insert after the last rotation of this MPRS
+                const lastRotation = afterMprs.rotations[afterMprs.rotations.length - 1];
+                insertLine = lastRotation ? lastRotation.line + 1 : afterMprs.line + 2;
+            } else {
+                insertLine = this._document.lineCount;
+            }
+        }
+
+        await editor.edit(editBuilder => {
+            const insertPosition = new vscode.Position(insertLine, 0);
+            editBuilder.insert(insertPosition, newMPRSContent + '\n');
+        });
+
+        vscode.window.showInformationMessage(`Created new MPRS: ${data.code} (${data.plateId}) - ${data.name}`);
+        
+        // Refresh tree view
+        this._treeDataProvider.refresh();
+        
+        // Navigate to the new MPRS
+        const newPosition = new vscode.Position(insertLine, 0);
+        editor.selection = new vscode.Selection(newPosition, newPosition);
+        editor.revealRange(new vscode.Range(newPosition, newPosition), vscode.TextEditorRevealType.InCenter);
+        
+        // Close the panel
+        this._panel.dispose();
+    }
+
+    private _findSortedInsertPosition(grotDoc: GrotDocument, newPlateId: number): number {
+        // Find where to insert based on sorted plate ID order
+        for (const mprs of grotDoc.mprsSequences) {
+            if (mprs.plateId > newPlateId) {
+                return mprs.line;
+            }
+        }
+        // Insert at end if no larger plate ID found
+        if (grotDoc.mprsSequences.length > 0) {
+            const lastMprs = grotDoc.mprsSequences[grotDoc.mprsSequences.length - 1];
+            const lastRotation = lastMprs.rotations[lastMprs.rotations.length - 1];
+            return lastRotation ? lastRotation.line + 1 : lastMprs.line + 2;
+        }
+        return this._document.lineCount;
+    }
+
+    private _update(): void {
+        this._panel.webview.html = this._getHtmlForWebview();
+    }
+
+    private _getHtmlForWebview(): string {
+        // Parse document to get existing MPRS for the dropdown
+        const grotDoc = GrotParser.parse(this._document);
+        const existingMPRS = grotDoc.mprsSequences;
+        
+        // Find suggested next plate ID
+        const existingIds = existingMPRS.map(m => m.plateId);
+        const maxId = existingIds.length > 0 ? Math.max(...existingIds) : 0;
+        const suggestedId = maxId + 1;
+        
+        // Build insert position options
+        const insertOptions = existingMPRS.map(mprs => 
+            `<option value="${mprs.plateId}">After ${mprs.code} (${mprs.plateId})</option>`
+        ).join('\n');
+        
+        return `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Add New MPRS</title>
+    <style>
+        :root {
+            --bg: var(--vscode-editor-background);
+            --fg: var(--vscode-editor-foreground);
+            --input-bg: var(--vscode-input-background);
+            --input-fg: var(--vscode-input-foreground);
+            --input-border: var(--vscode-input-border);
+            --button-bg: var(--vscode-button-background);
+            --button-fg: var(--vscode-button-foreground);
+            --button-hover: var(--vscode-button-hoverBackground);
+            --accent: var(--vscode-textLink-foreground);
+            --success: #4caf50;
+        }
+        body {
+            font-family: var(--vscode-font-family);
+            padding: 20px;
+            background: var(--bg);
+            color: var(--fg);
+        }
+        h1 {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 24px;
+            font-size: 1.4em;
+            border-bottom: 1px solid var(--input-border);
+            padding-bottom: 12px;
+        }
+        h1 .icon { font-size: 1.5em; }
+        .form-group {
+            margin-bottom: 16px;
+        }
+        label {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: 600;
+            color: var(--accent);
+        }
+        input, textarea, select {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid var(--input-border);
+            background: var(--input-bg);
+            color: var(--input-fg);
+            border-radius: 4px;
+            font-family: inherit;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        input:focus, textarea:focus, select:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+        textarea {
+            resize: vertical;
+            min-height: 60px;
+        }
+        .row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+        .row-3 {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 16px;
+        }
+        .actions {
+            display: flex;
+            gap: 12px;
+            margin-top: 24px;
+            padding-top: 16px;
+            border-top: 1px solid var(--input-border);
+        }
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+        .btn-primary {
+            background: var(--success);
+            color: white;
+        }
+        .btn-primary:hover {
+            background: #45a049;
+        }
+        .btn-secondary {
+            background: transparent;
+            color: var(--fg);
+            border: 1px solid var(--input-border);
+        }
+        .btn-secondary:hover {
+            background: var(--input-bg);
+        }
+        .hint {
+            font-size: 0.85em;
+            color: var(--vscode-descriptionForeground);
+            margin-top: 4px;
+        }
+        .info-box {
+            background: var(--input-bg);
+            border-radius: 6px;
+            padding: 16px;
+            margin-bottom: 20px;
+        }
+        .info-box p {
+            margin: 0;
+            font-size: 0.9em;
+        }
+        .section-title {
+            font-size: 1em;
+            font-weight: 600;
+            margin: 20px 0 12px 0;
+            color: var(--accent);
+        }
+        .preview {
+            background: var(--input-bg);
+            border-radius: 6px;
+            padding: 12px;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre;
+            overflow-x: auto;
+            margin-top: 16px;
+            border: 1px solid var(--input-border);
+        }
+    </style>
+</head>
+<body>
+    <h1><span class="icon">➕</span> Add New MPRS</h1>
+    
+    <div class="info-box">
+        <p>Create a new Moving Plate Rotation Sequence. A default 0 Ma (present-day) rotation will be added automatically.</p>
+    </div>
+
+    <form id="mprsForm">
+        <div class="section-title">Basic Information</div>
+        
+        <div class="row-3">
+            <div class="form-group">
+                <label for="plateId">Plate ID *</label>
+                <input type="number" id="plateId" value="${suggestedId}" required min="1">
+                <div class="hint">Unique numeric ID</div>
+            </div>
+            <div class="form-group">
+                <label for="code">Plate Code *</label>
+                <input type="text" id="code" required maxlength="10" placeholder="e.g., NAM">
+                <div class="hint">Short code (3-4 chars)</div>
+            </div>
+            <div class="form-group">
+                <label for="fixedPlateId">Fixed Plate ID *</label>
+                <input type="number" id="fixedPlateId" value="0" required min="0">
+                <div class="hint">Reference plate (0 = absolute)</div>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="name">Plate Name *</label>
+            <input type="text" id="name" required placeholder="e.g., North America">
+            <div class="hint">Full descriptive name of the tectonic plate</div>
+        </div>
+
+        <div class="row">
+            <div class="form-group">
+                <label for="platePair">Plate Pair (@PP)</label>
+                <input type="text" id="platePair" placeholder="e.g., NAM-AFR">
+                <div class="hint">Moving-Fixed plate code pair</div>
+            </div>
+            <div class="form-group">
+                <label for="insertPosition">Insert Position</label>
+                <select id="insertPosition">
+                    <option value="sorted">Auto (sorted by Plate ID)</option>
+                    <option value="end">End of file</option>
+                    ${insertOptions}
+                </select>
+                <div class="hint">Where to insert in the file</div>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="comment">Comment (@C)</label>
+            <textarea id="comment" rows="2" placeholder="Optional description or notes"></textarea>
+        </div>
+
+        <div class="section-title">Preview</div>
+        <div class="preview" id="preview"></div>
+
+        <div class="actions">
+            <button type="submit" class="btn-primary">✨ Create MPRS</button>
+            <button type="button" class="btn-secondary" onclick="cancel()">Cancel</button>
+        </div>
+    </form>
+
+    <script>
+        const vscode = acquireVsCodeApi();
+        
+        function updatePreview() {
+            const plateId = document.getElementById('plateId').value.padStart(3, '0');
+            const code = document.getElementById('code').value || 'CODE';
+            const name = document.getElementById('name').value || 'Plate Name';
+            const platePair = document.getElementById('platePair').value || (code + '-FIX');
+            const comment = document.getElementById('comment').value;
+            const fixedPlateId = document.getElementById('fixedPlateId').value.padStart(3, '0');
+            
+            let preview = '> @MPRS:pid"' + document.getElementById('plateId').value + '" @MPRS:code"' + code + '" @MPRS:name"' + name + '"\\n';
+            preview += '> @PP"' + platePair + '"' + (comment ? ' @C"' + comment + '"' : '') + '\\n';
+            preview += plateId + '  0.0000    90.0000   0.0000    0.0000    ' + fixedPlateId + '   @C"Present day"';
+            
+            document.getElementById('preview').textContent = preview.replace(/\\\\n/g, '\\n');
+        }
+        
+        // Auto-update plate pair when code changes
+        document.getElementById('code').addEventListener('input', function() {
+            const platePairInput = document.getElementById('platePair');
+            if (!platePairInput.value || platePairInput.dataset.autoFilled === 'true') {
+                const fixedId = document.getElementById('fixedPlateId').value;
+                platePairInput.value = this.value + '-' + (fixedId === '0' ? 'ABS' : fixedId.padStart(3, '0'));
+                platePairInput.dataset.autoFilled = 'true';
+            }
+            updatePreview();
+        });
+        
+        document.getElementById('platePair').addEventListener('input', function() {
+            this.dataset.autoFilled = 'false';
+            updatePreview();
+        });
+        
+        // Update preview on any input change
+        document.querySelectorAll('input, textarea, select').forEach(el => {
+            el.addEventListener('input', updatePreview);
+            el.addEventListener('change', updatePreview);
+        });
+        
+        document.getElementById('mprsForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            vscode.postMessage({
+                command: 'create',
+                data: {
+                    plateId: document.getElementById('plateId').value,
+                    code: document.getElementById('code').value,
+                    name: document.getElementById('name').value,
+                    platePair: document.getElementById('platePair').value || (document.getElementById('code').value + '-ABS'),
+                    comment: document.getElementById('comment').value,
+                    fixedPlateId: document.getElementById('fixedPlateId').value,
+                    insertPosition: document.getElementById('insertPosition').value
+                }
+            });
+        });
+        
+        function cancel() {
+            vscode.postMessage({ command: 'cancel' });
+        }
+        
+        // Initial preview
+        updatePreview();
+    </script>
+</body>
+</html>`;
+    }
+
+    public dispose(): void {
+        AddMPRSPanel.currentPanel = undefined;
+        this._panel.dispose();
+        while (this._disposables.length) {
+            const x = this._disposables.pop();
+            if (x) {
+                x.dispose();
+            }
+        }
+    }
+}
+
+// ============================================================================
 // Extension Activation
 // ============================================================================
 
@@ -1449,6 +1897,14 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.commands.registerCommand('grot.goToPlateId', goToPlateId),
         vscode.commands.registerCommand('grot.toggleRotation', toggleRotation),
         vscode.commands.registerCommand('grot.addRotation', addRotation),
+        vscode.commands.registerCommand('grot.addMPRS', () => {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor || editor.document.languageId !== 'grot') {
+                vscode.window.showErrorMessage('No .grot file is open');
+                return;
+            }
+            AddMPRSPanel.createOrShow(context.extensionUri, editor.document, treeDataProvider);
+        }),
         vscode.commands.registerCommand('grot.exportToCSV', exportToCSV),
         vscode.commands.registerCommand('grot.editMPRS', (mprsLine?: number) => editMPRSMetadata(context, mprsLine)),
         vscode.commands.registerCommand('grot.editMPRSFromTree', (item: GrotTreeItem) => {
