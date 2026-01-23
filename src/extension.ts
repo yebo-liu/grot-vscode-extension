@@ -685,18 +685,19 @@ class GrotFormattingProvider implements vscode.DocumentFormattingEditProvider {
             if (match && alignColumns) {
                 const [, , prefix, pid1, age, lat, lon, angle, pid2, rest] = match;
                 
-                // Format to match the user's existing file format:
+                // Format to match rotconv.py output (line 357):
+                // '{0:>8}{1:11.5f}{2:10.5f}{3:11.5f}{4:11.5f}{5:>8}'
                 // - Plate ID: 8 chars right-aligned
-                // - Age: 10 chars, 5 decimal places
-                // - Lat: 9 chars, 5 decimal places  
-                // - Lon: 10 chars, 5 decimal places (handles negative 3-digit values)
-                // - Angle: 10 chars, 5 decimal places
+                // - Age: 11 chars, 5 decimal places
+                // - Lat: 10 chars, 5 decimal places  
+                // - Lon: 11 chars, 5 decimal places
+                // - Angle: 11 chars, 5 decimal places
                 // - Fixed Plate: 8 chars right-aligned
                 const formattedPid1 = pid1.padStart(8);
-                const formattedAge = parseFloat(age).toFixed(5).padStart(10);
-                const formattedLat = parseFloat(lat).toFixed(5).padStart(9);
-                const formattedLon = parseFloat(lon).toFixed(5).padStart(10);
-                const formattedAngle = parseFloat(angle).toFixed(5).padStart(10);
+                const formattedAge = parseFloat(age).toFixed(5).padStart(11);
+                const formattedLat = parseFloat(lat).toFixed(5).padStart(10);
+                const formattedLon = parseFloat(lon).toFixed(5).padStart(11);
+                const formattedAngle = parseFloat(angle).toFixed(5).padStart(11);
                 const formattedPid2 = pid2.padStart(8);
                 
                 // Build line with proper spacing
