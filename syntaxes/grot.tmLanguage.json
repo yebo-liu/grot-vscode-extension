@@ -25,16 +25,17 @@
     "mprs-header": {
       "patterns": [
         {
-          "name": "meta.mprs-header.multiline.grot",
-          "begin": "^(>)\\s*.*(@C)(\"\"\")",
-          "end": "\"\"\"",
+          "name": "meta.mprs-header.multiline-comment.grot",
+          "begin": "^(>)\\s*((?:@[A-Z][A-Za-z0-9_:]*\"[^\"]*\"\\s*)*)(@C)(\"\"\")(\\s*)$",
+          "end": "^(\"\"\")",
           "beginCaptures": {
             "1": { "name": "keyword.control.mprs.grot" },
-            "2": { "name": "entity.name.tag.comment.grot" },
-            "3": { "name": "string.quoted.triple.comment.grot" }
+            "2": { "patterns": [{ "include": "#attribute" }] },
+            "3": { "name": "entity.name.tag.comment.grot" },
+            "4": { "name": "string.quoted.triple.comment.grot" }
           },
           "endCaptures": {
-            "0": { "name": "string.quoted.triple.comment.grot" }
+            "1": { "name": "string.quoted.triple.comment.grot" }
           },
           "contentName": "string.quoted.triple.comment.grot"
         },

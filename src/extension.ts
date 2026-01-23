@@ -1031,6 +1031,9 @@ class MPRSEditorPanel {
                     case 'goToLine':
                         this._goToLine(message.line);
                         break;
+                    case 'switchMPRS':
+                        this._switchToMPRS(message.plateId);
+                        break;
                 }
             },
             null,
@@ -1068,6 +1071,17 @@ class MPRSEditorPanel {
             const position = new vscode.Position(line, 0);
             editor.selection = new vscode.Selection(position, position);
             editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
+        }
+    }
+
+    private _switchToMPRS(plateId: number): void {
+        const grotDoc = GrotParser.parse(this._document);
+        const targetMprs = grotDoc.mprsSequences.find(m => m.plateId === plateId);
+        if (targetMprs) {
+            this._mprs = targetMprs;
+            this._update();
+            // Also navigate to the MPRS in the editor
+            this._goToLine(targetMprs.line);
         }
     }
 
@@ -1118,17 +1132,26 @@ class MPRSEditorPanel {
         // Build new header lines
         const newLine1 = `> @MPRS:pid"${data.newPlateId}" @MPRS:code"${data.code}" @MPRS:name"${data.name}"`;
         
-        // Format comment: use triple quotes for multi-line, single quotes for single-line
-        let commentStr = '';
+        // Format comment: use triple quotes for multi-line (on separate lines), single quotes for single-line
+        let commentLines: string[] = [];
+        const newLine2Base = `> @PP"${data.platePair}"`;
+        
         if (data.comment) {
             const trimmedComment = data.comment.trim();
             if (trimmedComment.includes('\n')) {
-                commentStr = ` @C"""${trimmedComment}"""`;
+                // Multi-line: put triple quotes on separate lines
+                commentLines = [
+                    `${newLine2Base} @C"""`,
+                    trimmedComment,
+                    `"""`
+                ];
             } else {
-                commentStr = ` @C"${trimmedComment}"`;
+                commentLines = [`${newLine2Base} @C"${trimmedComment}"`];
             }
+        } else {
+            commentLines = [newLine2Base];
         }
-        const newLine2 = `> @PP"${data.platePair}"${commentStr}`;
+        const newLine2 = commentLines.join('\n');
 
         const range = new vscode.Range(startLine, 0, endLine, this._document.lineAt(endLine).text.length);
         
@@ -1238,11 +1261,16 @@ class MPRSEditorPanel {
         const mprs = this._mprs;
         const comment = this._getMultiLineComment();
         
-        // Get all existing plate IDs for validation
+        // Get all existing plate IDs for validation and MPRS selector
         const grotDoc = GrotParser.parse(this._document);
         const existingPlateIds = grotDoc.mprsSequences
             .filter(m => m.plateId !== mprs.plateId)
             .map(m => m.plateId);
+        
+        // Build MPRS selector options
+        const mprsOptions = grotDoc.mprsSequences.map(m => 
+            `<option value="${m.plateId}" ${m.plateId === mprs.plateId ? 'selected' : ''}>${m.code} (${m.plateId}) - ${m.name}</option>`
+        ).join('\n');
         
         return `<!DOCTYPE html>
 <html lang="en">
@@ -1289,7 +1317,7 @@ class MPRSEditorPanel {
             font-weight: 600;
             color: var(--accent);
         }
-        input, textarea {
+        input, textarea, select {
             width: 100%;
             padding: 8px 12px;
             border: 1px solid var(--input-border);
@@ -1300,7 +1328,7 @@ class MPRSEditorPanel {
             font-size: 14px;
             box-sizing: border-box;
         }
-        input:focus, textarea:focus {
+        input:focus, textarea:focus, select:focus {
             outline: none;
             border-color: var(--accent);
         }
@@ -1442,18 +1470,23 @@ class MPRSEditorPanel {
     </div>
 
     <form id="mprsForm">
+        <div class="section-title">Select MPRS</div>
+        
+        <div class="form-group">
+            <label for="currentPlateId">Current Plate ID</label>
+            <select id="currentPlateId">
+                ${mprsOptions}
+            </select>
+            <div class="hint">Select another MPRS to edit its metadata</div>
+        </div>
+        
         <div class="section-title">Plate Identification</div>
         
-        <div class="row-3">
-            <div class="form-group">
-                <label for="originalPlateId">Original Plate ID</label>
-                <input type="number" id="originalPlateId" value="${mprs.plateId}" disabled>
-                <div class="hint">Current ID (read-only)</div>
-            </div>
+        <div class="row">
             <div class="form-group">
                 <label for="newPlateId">New Plate ID</label>
                 <input type="number" id="newPlateId" value="${mprs.plateId}" required min="1">
-                <div class="hint">Change to reassign ID</div>
+                <div class="hint">Change to reassign this MPRS's plate ID</div>
                 <div class="error-msg" id="plateIdError">This plate ID is already taken!</div>
             </div>
             <div class="form-group">
@@ -1490,17 +1523,29 @@ class MPRSEditorPanel {
     <script>
         const vscode = acquireVsCodeApi();
         const existingPlateIds = [${existingPlateIds.join(',')}];
-        const originalPlateId = ${mprs.plateId};
+        const currentPlateId = ${mprs.plateId};
         
+        const currentPlateIdSelect = document.getElementById('currentPlateId');
         const newPlateIdInput = document.getElementById('newPlateId');
         const plateIdError = document.getElementById('plateIdError');
         const plateIdWarning = document.getElementById('plateIdWarning');
         const saveBtn = document.getElementById('saveBtn');
         
+        // Switch to a different MPRS when selector changes
+        currentPlateIdSelect.addEventListener('change', () => {
+            const selectedPlateId = parseInt(currentPlateIdSelect.value);
+            if (selectedPlateId !== currentPlateId) {
+                vscode.postMessage({
+                    command: 'switchMPRS',
+                    plateId: selectedPlateId
+                });
+            }
+        });
+        
         function validatePlateId() {
             const newId = parseInt(newPlateIdInput.value);
             const isDuplicate = existingPlateIds.includes(newId);
-            const isChanged = newId !== originalPlateId;
+            const isChanged = newId !== currentPlateId;
             
             // Show/hide error
             if (isDuplicate) {
@@ -1534,7 +1579,7 @@ class MPRSEditorPanel {
             vscode.postMessage({
                 command: 'save',
                 data: {
-                    originalPlateId: document.getElementById('originalPlateId').value,
+                    originalPlateId: currentPlateId.toString(),
                     newPlateId: document.getElementById('newPlateId').value,
                     code: document.getElementById('code').value,
                     name: document.getElementById('name').value,
@@ -1700,22 +1745,28 @@ class AddMPRSPanel {
         const plateIdPadded = data.plateId.padStart(3, '0');
         const fixedPlateIdPadded = data.fixedPlateId.padStart(3, '0');
         
-        // Format comment: use triple quotes for multi-line, single quotes for single-line
-        let commentStr = '';
+        // Format comment: use triple quotes for multi-line (on separate lines), single quotes for single-line
+        let headerLines: string[] = [
+            `> @MPRS:pid"${data.plateId}" @MPRS:code"${data.code}" @MPRS:name"${data.name}"`
+        ];
+        
         if (data.comment) {
             const trimmedComment = data.comment.trim();
             if (trimmedComment.includes('\n')) {
-                commentStr = ` @C"""${trimmedComment}"""`;
+                // Multi-line: put triple quotes on separate lines
+                headerLines.push(`> @PP"${data.platePair}" @C"""`);
+                headerLines.push(trimmedComment);
+                headerLines.push(`"""`);
             } else {
-                commentStr = ` @C"${trimmedComment}"`;
+                headerLines.push(`> @PP"${data.platePair}" @C"${trimmedComment}"`);
             }
+        } else {
+            headerLines.push(`> @PP"${data.platePair}"`);
         }
         
-        const newMPRSContent = [
-            `> @MPRS:pid"${data.plateId}" @MPRS:code"${data.code}" @MPRS:name"${data.name}"`,
-            `> @PP"${data.platePair}"${commentStr}`,
-            `${plateIdPadded}  0.0000    90.0000   0.0000    0.0000    ${fixedPlateIdPadded}   @C"Present day"`
-        ].join('\n');
+        headerLines.push(`${plateIdPadded}  0.0000    90.0000   0.0000    0.0000    ${fixedPlateIdPadded}   @C"Present day"`);
+        
+        const newMPRSContent = headerLines.join('\n');
 
         // Determine insert position
         let insertLine: number;
