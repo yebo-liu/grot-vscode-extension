@@ -557,114 +557,6 @@ class GrotDocumentSymbolProvider implements vscode.DocumentSymbolProvider {
 }
 
 // ============================================================================
-// Diagnostics Provider
-// ============================================================================
-
-class GrotDiagnosticsProvider {
-    private diagnosticCollection: vscode.DiagnosticCollection;
-
-    constructor() {
-        this.diagnosticCollection = vscode.languages.createDiagnosticCollection('grot');
-    }
-
-    updateDiagnostics(document: vscode.TextDocument): void {
-        if (document.languageId !== 'grot') {
-            return;
-        }
-
-        const config = vscode.workspace.getConfiguration('grot');
-        if (!config.get('validation.enabled', true)) {
-            this.diagnosticCollection.clear();
-            return;
-        }
-
-        const diagnostics: vscode.Diagnostic[] = [];
-        const grotDoc = GrotParser.parse(document);
-
-        // Check for required header attributes
-        const requiredHeaders = ['GPLATESROTATIONFILE:version'];
-        for (const required of requiredHeaders) {
-            if (!grotDoc.header.has(required)) {
-                diagnostics.push(new vscode.Diagnostic(
-                    new vscode.Range(0, 0, 0, 1),
-                    `Missing required header attribute: @${required}`,
-                    vscode.DiagnosticSeverity.Warning
-                ));
-            }
-        }
-
-        // Validate MPRS sequences
-        for (const mprs of grotDoc.mprsSequences) {
-            // Check for consistent plate IDs
-            if (config.get('validation.checkPlateIds', true)) {
-                for (const rotation of mprs.rotations) {
-                    if (rotation.plateId1 !== mprs.plateId) {
-                        diagnostics.push(new vscode.Diagnostic(
-                            new vscode.Range(rotation.line, 0, rotation.line, 5),
-                            `Plate ID ${rotation.plateId1} doesn't match MPRS plate ID ${mprs.plateId}`,
-                            vscode.DiagnosticSeverity.Error
-                        ));
-                    }
-                }
-            }
-
-            // Check age sequence
-            if (config.get('validation.checkAgeSequence', true)) {
-                let prevAge = -Infinity;
-                for (const rotation of mprs.rotations) {
-                    if (rotation.disabled) continue;
-                    if (rotation.age < prevAge) {
-                        diagnostics.push(new vscode.Diagnostic(
-                            new vscode.Range(rotation.line, 0, rotation.line, document.lineAt(rotation.line).text.length),
-                            `Age ${rotation.age} Ma is out of sequence (previous: ${prevAge} Ma)`,
-                            vscode.DiagnosticSeverity.Warning
-                        ));
-                    }
-                    prevAge = rotation.age;
-                }
-            }
-
-            // Check for missing 0 Ma rotation
-            const hasZeroAge = mprs.rotations.some(r => !r.disabled && r.age === 0);
-            if (!hasZeroAge && mprs.rotations.length > 0) {
-                diagnostics.push(new vscode.Diagnostic(
-                    new vscode.Range(mprs.line, 0, mprs.line, document.lineAt(mprs.line).text.length),
-                    `MPRS ${mprs.code} is missing a 0 Ma (present-day) rotation`,
-                    vscode.DiagnosticSeverity.Hint
-                ));
-            }
-
-            // Check for duplicate ages
-            const ages = new Map<number, number[]>();
-            for (const rotation of mprs.rotations) {
-                if (rotation.disabled) continue;
-                if (!ages.has(rotation.age)) {
-                    ages.set(rotation.age, []);
-                }
-                ages.get(rotation.age)!.push(rotation.line);
-            }
-            ages.forEach((lines, age) => {
-                if (lines.length > 1) {
-                    for (const line of lines) {
-                        diagnostics.push(new vscode.Diagnostic(
-                            new vscode.Range(line, 0, line, document.lineAt(line).text.length),
-                            `Duplicate age ${age} Ma in MPRS ${mprs.code}`,
-                            vscode.DiagnosticSeverity.Warning
-                        ));
-                    }
-                }
-            });
-        }
-
-        this.diagnosticCollection.set(document.uri, diagnostics);
-    }
-
-    dispose(): void {
-        this.diagnosticCollection.dispose();
-    }
-}
-
-// ============================================================================
 // Commands
 // ============================================================================
 
@@ -2108,20 +2000,10 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.languages.registerDocumentSymbolProvider('grot', new GrotDocumentSymbolProvider())
     );
 
-    // Register diagnostics
-    const diagnosticsProvider = new GrotDiagnosticsProvider();
-    context.subscriptions.push(diagnosticsProvider);
-
-    // Update diagnostics on document changes
+    // Update tree view on document changes
     context.subscriptions.push(
-        vscode.workspace.onDidChangeTextDocument(e => {
-            if (e.document.languageId === 'grot') {
-                diagnosticsProvider.updateDiagnostics(e.document);
-            }
-        }),
         vscode.workspace.onDidOpenTextDocument(doc => {
             if (doc.languageId === 'grot') {
-                diagnosticsProvider.updateDiagnostics(doc);
                 treeDataProvider.refresh();
                 vscode.commands.executeCommand('setContext', 'grotFileOpen', true);
             }
@@ -2167,13 +2049,6 @@ export function activate(context: vscode.ExtensionContext): void {
                 editMPRSMetadata(context, item.lineNumber);
             }
         }),
-        vscode.commands.registerCommand('grot.validateFile', () => {
-            const editor = vscode.window.activeTextEditor;
-            if (editor && editor.document.languageId === 'grot') {
-                diagnosticsProvider.updateDiagnostics(editor.document);
-                vscode.window.showInformationMessage('Validation complete. Check the Problems panel for issues.');
-            }
-        }),
         vscode.commands.registerCommand('grot.formatFile', () => {
             vscode.commands.executeCommand('editor.action.formatDocument');
         })
@@ -2182,7 +2057,6 @@ export function activate(context: vscode.ExtensionContext): void {
     // Initial refresh if a grot file is already open
     if (vscode.window.activeTextEditor?.document.languageId === 'grot') {
         treeDataProvider.refresh();
-        diagnosticsProvider.updateDiagnostics(vscode.window.activeTextEditor.document);
         vscode.commands.executeCommand('setContext', 'grotFileOpen', true);
     }
 }

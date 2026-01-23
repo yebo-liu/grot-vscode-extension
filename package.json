@@ -1,7 +1,7 @@
 {
   "name": "grot-editor",
   "displayName": "GPlates Rotation File Editor",
-  "description": "Full-featured editor for GPlates .grot rotation files with syntax highlighting, tree navigation, validation, and editing tools",
+  "description": "Full-featured editor for GPlates .grot rotation files with syntax highlighting, tree navigation, and editing tools",
   "version": "1.0.0",
   "publisher": "gplates-community",
   "engines": {
@@ -59,10 +59,6 @@
       {
         "command": "grot.addMPRS",
         "title": "GROT: Add New Moving Plate Rotation Sequence"
-      },
-      {
-        "command": "grot.validateFile",
-        "title": "GROT: Validate File"
       },
       {
         "command": "grot.goToMPRS",
@@ -157,21 +153,6 @@
     "configuration": {
       "title": "GPlates Rotation Editor",
       "properties": {
-        "grot.validation.enabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Enable real-time validation of .grot files"
-        },
-        "grot.validation.checkPlateIds": {
-          "type": "boolean",
-          "default": true,
-          "description": "Validate that plate IDs are consistent"
-        },
-        "grot.validation.checkAgeSequence": {
-          "type": "boolean",
-          "default": true,
-          "description": "Check that ages are in ascending order within MPRS"
-        },
         "grot.treeView.showDisabled": {
           "type": "boolean",
           "default": true,
