@@ -351,7 +351,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/gplates-community/grot-vscode-extension"
+    "url": "https://github.com/yebo-liu/grot-vscode-extension"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "homepage": "https://github.com/yebo-liu/grot-vscode-extension#readme",
+  "bugs": {
+    "url": "https://github.com/yebo-liu/grot-vscode-extension/issues"
+  }
 }

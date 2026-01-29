@@ -104,6 +104,18 @@ npm run package
 | `grot.treeView.showDisabled` | `true` | Show disabled rotations in tree |
 | `grot.hover.showPlateInfo` | `true` | Show plate info on hover |
 
+## Acknowledgments
+
+This VS Code extension builds upon the original GROT (GPlates Rotation) format and TextMate bundle created by **Christian Heine** (@chhei) in 2011.
+
+### Original Work
+- **GROT Format Documentation**: [GROT Format Specification](https://wiki.paleoearthlabs.org/computing/gplates/grot/start) - Comprehensive documentation explaining the rationale and design of the GROT format
+- **Original TextMate Bundle**:
+  - [GPlates.tmbundle](https://code.paleoearthlabs.org/GPlates.tmbundle/doc/trunk/README.md) (PaleoEarthLabs)
+  - [SourceHut Mirror](https://git.sr.ht/~chhei/GPlates.tmbundle)
+
+We are grateful for this foundational work that made modern tooling for GROT files possible.
+
 ## File Format Reference
 
 The `.grot` format is the GPlates rotation file format. Key elements:
@@ -149,7 +161,7 @@ Prefix with `#`:
 
 ## Contributing
 
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Contributions are welcome! Please open an issue or pull request on GitHub.
 
 ## License
 
@@ -158,7 +170,8 @@ MIT License - see [LICENSE](LICENSE) for details.
 ## Links
 
 - [GPlates Software](https://www.gplates.org/)
-- [GROT Format Specification](https://www.gplates.org/grot/)
+- [GROT Format Documentation](https://wiki.paleoearthlabs.org/computing/gplates/grot/start) (Original specification by Christian Heine)
+- [Original TextMate Bundle](https://code.paleoearthlabs.org/GPlates.tmbundle/doc/trunk/README.md)
 - [EarthByte Group](https://www.earthbyte.org/)
 
 ---
